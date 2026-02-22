@@ -33,12 +33,14 @@
       "README.md"
     ],
     "mac": {
+      "icon": "build/icon.icns",
       "target": [
         "dmg"
       ],
       "category": "public.app-category.medical"
     },
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         {
           "target": "nsis",
