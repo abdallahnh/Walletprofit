@@ -470,8 +470,16 @@ async function syncWallet() {
     totalFetched += items.length;
     totalInserted += res.inserted;
     totalIgnored += res.ignored;
-    nextUrl = wallet?.next_page_url + '&wallet=${encodeURIComponent(cfg.wallet || "main")}' || null;
-    console.log("NEXT URL =", nextUrl);
+
+  if (wallet?.next_page_url) {
+   const u = new URL(wallet.next_page_url);
+   u.searchParams.set("wallet", cfg.wallet || "main");
+  nextUrl = u.toString();
+} else {
+  nextUrl = null;
+}
+
+console.log("NEXT URL =", nextUrl);
     // safety
     if (pages > 500) break;
   }
