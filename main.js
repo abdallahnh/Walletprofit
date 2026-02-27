@@ -1,67 +1,66 @@
-const { app, BrowserWindow, ipcMain, dialog, protocol } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require("electron");
 const path = require("path");
 const db = require("./db");
 
-// IMPORTANT: must be called before app is ready
-protocol.registerSchemesAsPrivileged([
-  {
-    scheme: "app",
-    privileges: {
-      standard: true,
-      secure: true,
-      supportFetchAPI: true,
-      corsEnabled: true
-    }
+function resolveIndexHtml() {
+  // In dev: use project folder
+  if (!app.isPackaged) {
+    return path.join(__dirname, "renderer", "index.html");
   }
-]);
 
-let mainWindow = null;
-
-function registerAppProtocol() {
-  // Maps: app://-/index.html  ->  <appDir>/renderer/index.html
-  protocol.registerFileProtocol("app", (request, callback) => {
-    try {
-      const url = new URL(request.url);
-
-      // normalize path (avoid .. traversal)
-      let relPath = decodeURIComponent(url.pathname || "");
-      if (relPath.startsWith("/")) relPath = relPath.slice(1);
-      if (!relPath) relPath = "index.html";
-
-      // force everything to come only from renderer folder
-      const safePath = path.normalize(relPath).replace(/^(\.\.(\/|\\|$))+/, "");
-      const filePath = path.join(__dirname, "renderer", safePath);
-
-      callback({ path: filePath });
-    } catch (e) {
-      console.error("app:// protocol error", e);
-      callback({ error: -2 }); // FILE_NOT_FOUND
-    }
-  });
+  // In prod (Windows/mac installers): resourcesPath/app.asar/...
+  // When packaged, __dirname is usually inside app.asar already, but this is more robust.
+  return path.join(process.resourcesPath, "app.asar", "renderer", "index.html");
 }
 
 function createWindow() {
-  mainWindow = new BrowserWindow({
+  const win = new BrowserWindow({
     width: 1400,
     height: 860,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
     }
   });
 
-  // Helpful diagnostics (you can keep these)
-  mainWindow.webContents.on("did-fail-load", (event, errorCode, errorDescription, validatedURL) => {
-    console.error("did-fail-load:", { errorCode, errorDescription, validatedURL });
+  // Simple menu to open DevTools on partner laptop
+  const menu = Menu.buildFromTemplate([
+    {
+      label: "View",
+      submenu: [
+        { label: "Reload", accelerator: "Ctrl+R", click: () => win.reload() },
+        { label: "Force Reload", accelerator: "Ctrl+Shift+R", click: () => win.webContents.reloadIgnoringCache() },
+        { label: "Toggle DevTools", accelerator: "Ctrl+Shift+I", click: () => win.webContents.toggleDevTools() },
+      ]
+    }
+  ]);
+  Menu.setApplicationMenu(menu);
+
+  const indexPath = resolveIndexHtml();
+  console.log("Loading UI from:", indexPath);
+
+  win.loadFile(indexPath);
+
+  // If it fails, show a readable error instead of white screen
+  win.webContents.on("did-fail-load", (_e, errorCode, errorDesc, validatedURL) => {
+    console.error("did-fail-load", { errorCode, errorDesc, validatedURL, indexPath });
+
+    const html = `
+      <html><body style="font-family:system-ui;padding:20px">
+        <h2>Wallet Profit - UI failed to load</h2>
+        <p><b>Error:</b> ${errorDesc} (${errorCode})</p>
+        <p><b>URL:</b> ${validatedURL}</p>
+        <p><b>Expected file:</b> ${indexPath}</p>
+        <p>Ask Abdallah to send this screenshot + the console logs.</p>
+      </body></html>`;
+    win.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
   });
 
-  // Load via custom protocol (NOT file://)
-  mainWindow.loadURL("app://-/index.html");
+  return win;
 }
 
 app.whenReady().then(() => {
-  registerAppProtocol();
   db.initDb(app.getPath("userData"));
   createWindow();
 });
