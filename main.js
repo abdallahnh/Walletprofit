@@ -1,9 +1,47 @@
-const { app, BrowserWindow, ipcMain, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, protocol } = require("electron");
 const path = require("path");
 const db = require("./db");
 
+// IMPORTANT: must be called before app is ready
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "app",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true
+    }
+  }
+]);
+
+let mainWindow = null;
+
+function registerAppProtocol() {
+  // Maps: app://-/index.html  ->  <appDir>/renderer/index.html
+  protocol.registerFileProtocol("app", (request, callback) => {
+    try {
+      const url = new URL(request.url);
+
+      // normalize path (avoid .. traversal)
+      let relPath = decodeURIComponent(url.pathname || "");
+      if (relPath.startsWith("/")) relPath = relPath.slice(1);
+      if (!relPath) relPath = "index.html";
+
+      // force everything to come only from renderer folder
+      const safePath = path.normalize(relPath).replace(/^(\.\.(\/|\\|$))+/, "");
+      const filePath = path.join(__dirname, "renderer", safePath);
+
+      callback({ path: filePath });
+    } catch (e) {
+      console.error("app:// protocol error", e);
+      callback({ error: -2 }); // FILE_NOT_FOUND
+    }
+  });
+}
+
 function createWindow() {
-  const win = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1400,
     height: 860,
     webPreferences: {
@@ -12,10 +50,18 @@ function createWindow() {
       nodeIntegration: false
     }
   });
-  win.loadFile(path.join(__dirname, "renderer", "index.html"));
+
+  // Helpful diagnostics (you can keep these)
+  mainWindow.webContents.on("did-fail-load", (event, errorCode, errorDescription, validatedURL) => {
+    console.error("did-fail-load:", { errorCode, errorDescription, validatedURL });
+  });
+
+  // Load via custom protocol (NOT file://)
+  mainWindow.loadURL("app://-/index.html");
 }
 
 app.whenReady().then(() => {
+  registerAppProtocol();
   db.initDb(app.getPath("userData"));
   createWindow();
 });
@@ -28,6 +74,7 @@ app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });
 
+// IPC
 ipcMain.handle("import:tsv", (_, text) => db.importTransactionsText(text));
 ipcMain.handle("orders:get", (_, opts) => db.getOrdersReconciliation(opts || {}));
 ipcMain.handle("totals:get", (_, opts) => db.getTotals(opts || {}));
