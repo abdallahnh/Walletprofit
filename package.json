@@ -21,6 +21,7 @@
     "electron-builder": "24.13.3"
   },
   "build": {
+     "asar": true,
     "appId": "com.wallet.profit",
     "productName": "ANWallet",
     "directories": {
@@ -28,9 +29,10 @@
       "buildResources": "build"
     },
     "files": [
-      "*",
-      "package.json",
-      "README.md"
+      "**/*",
+      "!node_modules/**",
+      "!dist/**",
+      "!*.log"
     ],
     "mac": {
       "icon": "build/icon.icns",
