@@ -21,4 +21,5 @@ contextBridge.exposeInMainWorld("api", {
   walletGetConfig: () => ipcRenderer.invoke("wallet:getConfig"),
   walletSaveConfig: (cfg) => ipcRenderer.invoke("wallet:saveConfig", cfg),
   walletSync: () => ipcRenderer.invoke("wallet:sync"),
+openOrder: (code) => ipcRenderer.invoke("open-order", code)
 });

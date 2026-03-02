@@ -1,7 +1,6 @@
-
 {
   "name": "wallet-profit-app",
-  "version": "2.2.11",
+  "version": "2.2.12",
   "description": "Wallet profile data",
   "main": "src/main/main.js",
   "private": true,
@@ -50,16 +49,15 @@
         }
       ]
     },
-  "nsis": {
-    "oneClick": false,
-    "allowElevation": true,
-    "allowToChangeInstallationDirectory": true,
-    "createDesktopShortcut": true,
-    "installerIcon": "build/icon.ico",
-    "uninstallerIcon": "build/icon.ico",
-    "createDesktopShortcut": true,
-    "runAfterFinish": true,
-    "deleteAppDataOnUninstall": false
-  }
+    "nsis": {
+      "oneClick": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
+    }
   }
 }

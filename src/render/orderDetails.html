@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Order Details</title>
+
+  <style>
+    body {
+      font-family: system-ui;
+      margin: 0;
+      padding: 20px;
+      background: #f5f6f8;
+    }
+
+    h2 {
+      margin-bottom: 10px;
+    }
+
+    .section {
+      background: white;
+      padding: 16px;
+      margin-bottom: 16px;
+      border-radius: 10px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    }
+
+    .items-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 16px;
+    }
+
+    .item-card {
+      background: #fafafa;
+      border-radius: 10px;
+      padding: 10px;
+      text-align: center;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+    }
+
+    .item-card img {
+      width: 150px;
+      height: 150px;
+      object-fit: contain;
+      border-radius: 8px;
+      margin-bottom: 8px;
+    }
+
+    .label {
+      font-size: 13px;
+      color: #666;
+    }
+
+    .value {
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+  </style>
+</head>
+<body>
+
+  <h2 id="orderTitle"></h2>
+
+  <div class="section">
+    <h3>Customer Info</h3>
+    <div id="customerInfo"></div>
+    <div id="address"></div>
+    <div id="maps"></div>
+  </div>
+
+  <div class="section">
+    <h3>Order Summary</h3>
+    <div id="orderSummary"></div>
+  </div>
+
+  <div class="section">
+    <h3>Items</h3>
+    <div id="itemsContainer" class="items-grid"></div>
+  </div>
+
+  <script src="orderDetails.js"></script>
+</body>
+</html>

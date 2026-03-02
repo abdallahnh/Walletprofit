@@ -57,6 +57,10 @@ function renderRows(rows) {
     const tr = document.createElement("tr");
 
     tr.innerHTML = `
+      <td>
+  <button class="view-btn" data-code="${r.order_code}">
+    View
+  </button></td>
       <td>${r.order_code}</td>
       <td class="num">${fmt(r.gross)}</td>
       <td class="num">${fmt(r.service_fee)}</td>
@@ -77,6 +81,13 @@ function renderRows(rows) {
 
     tbody.appendChild(tr);
   }
+
+  document.querySelectorAll(".view-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const code = btn.getAttribute("data-code");
+    window.api.openOrder(code);
+  });
+});
 
   // wire inputs
   tbody.querySelectorAll("input[data-kind='cost']").forEach((inp) => {
@@ -236,6 +247,7 @@ $("btnWalletSave").addEventListener("click", async () => {
 chkSettlements.addEventListener("change", () => {
   refresh().catch(setError);
 });
+
 
 // Initial load
 refresh().catch(setError);

@@ -1,6 +1,8 @@
 // src/main/main.js
 const { app, BrowserWindow, ipcMain, dialog, Menu } = require("electron");
 const path = require("path");
+const { syncOrders, loadDetailsByCode } = require("../services/orderService");
+const { setAuthToken } = require("../services/totersApi");
 
 // IMPORTANT: with your new structure, db.js is in src/render
 const db = require("../render/db");
@@ -135,6 +137,37 @@ ipcMain.handle("backup:import", async () => {
   });
   if (res.canceled || !res.filePaths?.length) return { ok: false, error: "Canceled" };
   return db.importBackupJsonFromFile(res.filePaths[0]);
+});
+
+ipcMain.handle("open-order", async (_, orderCode) => {
+  const cfg = db.getWalletConfig();
+  if (!cfg?.token || !cfg?.storeId) {
+    return;
+  }
+
+  setAuthToken(cfg.token);
+
+  await syncOrders(cfg.storeId);
+
+  const order = await loadDetailsByCode(orderCode);
+  if (!order) return;
+
+  const orderPath = path.join(app.getAppPath(), "src", "render", "orderDetails.html");
+
+  const win = new BrowserWindow({
+    width: 900,
+    height: 700,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false
+    }
+  });
+
+  win.loadFile(orderPath);
+
+  win.webContents.on("did-finish-load", () => {
+    win.webContents.send("order-data", order);
+  });
 });
 
 ipcMain.handle("wallet:getConfig", () => db.getWalletConfig());

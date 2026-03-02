@@ -189,6 +189,7 @@ function computeOrders() {
     }
 
     const agg = byOrder.get(oc);
+
     agg.row_count += 1;
     if (r.created_at) agg.dates.add(r.created_at);
 
@@ -208,23 +209,14 @@ function computeOrders() {
 const incentive = agg.incentive || 0;
 
 const merchant_payout =
-  (agg.gross || 0)
-  - (agg.service_fee || 0)
-  - (agg.vat || 0)
-  + incentive;
+  agg.gross - agg.service_fee - agg.vat + incentive;
 
-const toters_profit =
-  (agg.service_fee || 0)
-  + (agg.vat || 0)
-  - incentive;
+const toters_margin =
+  agg.service_fee + agg.vat - incentive;
 
 const net_profit =
   merchant_payout - (meta.supplier_cost || 0);
-
-    const toters_margin = (agg.vat || 0) + (agg.service_fee || 0) - (agg.incentive || 0);
-    //const merchant_payout = (agg.gross || 0) - (agg.service_fee || 0) - (agg.vat || 0) - (agg.incentive || 0);
-    //const net_profit = toters_margin - (meta.supplier_cost || 0);
-
+   
     const datesArr = Array.from(agg.dates);
     orders.push({
       order_code: agg.order_code,
@@ -242,7 +234,8 @@ const net_profit =
     });
   }
 
-  orders.sort((a, b) => a.order_code.localeCompare(b.order_code));
+  orders.sort((a, b) => a.order_code.localeCompare(b.created_at));
+
   return { orders, settlementsTotal };
 }
 

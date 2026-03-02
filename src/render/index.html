@@ -18,11 +18,39 @@
     .stat { padding: 8px 10px; border-radius: 12px; background:#fafafa; border:1px solid #eee; font-size:12px; }
     .stat b { font-variant-numeric: tabular-nums; }
     .error { color:#b00020; white-space:pre-wrap; font-size:12px; margin:8px 0; }
+    
     .wrap { overflow:auto; max-height: 520px; border:1px solid #eee; border-radius: 12px; }
-    table { width:100%; border-collapse: collapse; }
-    th, td { border-bottom:1px solid #e6e6e6; padding:8px; font-size:12px; text-align:left; }
-    th { position: sticky; top:0; background:#fafafa; z-index:1; }
-    td.num, th.num { text-align:right; font-variant-numeric: tabular-nums; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed; /* IMPORTANT */
+}
+
+th, td {
+  border-bottom: 1px solid #e6e6e6;
+  padding: 8px;
+  font-size: 12px;
+  text-align: left;
+  vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+th {
+  position: sticky;
+  top: 0;
+  background: #fafafa;
+  z-index: 2;
+}
+
+td.num, th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.view-btn { padding: 8px 12px; border-radius: 12px; background:#eee; cursor:pointer; }
     .inp { width: 120px; padding:6px; border:1px solid #ddd; border-radius:8px; font-family: ui-monospace, Menlo, Monaco, Consolas, monospace; font-size: 12px; }
 
     /* Modal */
@@ -104,6 +132,7 @@
     <table id="table">
       <thead>
         <tr>
+          <th></th>
           <th>Order</th>
           <th class="num">Gross</th>
           <th class="num">Service</th>
