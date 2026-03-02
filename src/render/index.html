@@ -1,0 +1,156 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Wallet Profit</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 16px; }
+    h1 { font-size: 18px; margin: 0 0 8px; }
+    .muted { color:#666; font-size:12px; margin-bottom:10px; }
+    .row { display:flex; gap:10px; flex-wrap:wrap; margin:10px 0 12px; align-items:center; }
+    textarea { width: 100%; height: 220px; padding: 10px; font-family: ui-monospace, Menlo, Monaco, Consolas, monospace; font-size: 12px; }
+    button { padding: 10px 14px; border: 0; border-radius: 10px; cursor: pointer; }
+    button.primary { background:#111; color:#fff; }
+    button.secondary { background:#eee; }
+    .pill { display:inline-flex; gap:8px; align-items:center; padding:6px 10px; border-radius:999px; background:#f2f2f2; font-size:12px; }
+    .stats { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0 12px; }
+    .stat { padding: 8px 10px; border-radius: 12px; background:#fafafa; border:1px solid #eee; font-size:12px; }
+    .stat b { font-variant-numeric: tabular-nums; }
+    .error { color:#b00020; white-space:pre-wrap; font-size:12px; margin:8px 0; }
+    
+    .wrap { overflow:auto; max-height: 520px; border:1px solid #eee; border-radius: 12px; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed; /* IMPORTANT */
+}
+
+th, td {
+  border-bottom: 1px solid #e6e6e6;
+  padding: 8px;
+  font-size: 12px;
+  text-align: left;
+  vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+th {
+  position: sticky;
+  top: 0;
+  background: #fafafa;
+  z-index: 2;
+}
+
+td.num, th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.view-btn { padding: 8px 12px; border-radius: 12px; background:#eee; cursor:pointer; }
+    .inp { width: 120px; padding:6px; border:1px solid #ddd; border-radius:8px; font-family: ui-monospace, Menlo, Monaco, Consolas, monospace; font-size: 12px; }
+
+    /* Modal */
+    .hidden { display:none !important; }
+    .modal-backdrop { position:fixed; inset:0; background: rgba(0,0,0,0.35); }
+    .modal { position:fixed; left:50%; top:50%; transform: translate(-50%, -50%);
+      width:min(560px, calc(100vw - 32px)); background:#fff; border-radius: 14px;
+      box-shadow: 0 16px 60px rgba(0,0,0,0.25); border: 1px solid rgba(0,0,0,0.08);
+    }
+    .modal-header { display:flex; align-items:center; justify-content:space-between; padding:12px 12px 0 12px; }
+    .modal-header h3 { margin:0; font-size:14px; }
+    .modal-body { padding: 12px; display:flex; flex-direction:column; gap: 8px; }
+    .modal-body label { font-size:12px; color:#444; }
+    .modal-body input { width:100%; padding:10px; border:1px solid #ddd; border-radius:10px; font-size:12px; }
+    .modal-actions { display:flex; gap:10px; justify-content:flex-end; margin-top: 8px; }
+    .hint { font-size:12px; color:#666; margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <!-- Wallet Settings Modal -->
+  <div id="walletModalBackdrop" class="modal-backdrop hidden"></div>
+
+  <div id="walletModal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-header">
+      <h3>Wallet Settings</h3>
+      <button id="btnWalletClose" class="secondary">✕</button>
+    </div>
+
+    <div class="modal-body">
+      <label>Base URL</label>
+      <input id="inpBaseUrl" type="text" placeholder="https://dashboard.toters-api.com" />
+
+      <label>Store ID</label>
+      <input id="inpStoreId" type="text" placeholder="100908" />
+
+      <label>Wallet</label>
+      <input id="inpWallet" type="text" placeholder="main" />
+
+      <label>Bearer Token</label>
+      <input id="inpToken" type="password" placeholder="Paste token here" />
+
+      <div class="modal-actions">
+        <button id="btnWalletSave" class="primary">Save</button>
+        <button id="btnWalletCancel" class="secondary">Cancel</button>
+      </div>
+
+      <div id="walletModalMsg" class="hint"></div>
+    </div>
+  </div>
+
+  <h1>Wallet Profit (Ops)</h1>
+  <div class="muted">
+    Paste wallet rows (TSV): <b>id Amount Reason Type Date</b>. Duplicate IDs are ignored automatically by the database.
+  </div>
+
+  <div class="row">
+    <button class="primary" id="btnImport">Import / Merge</button>
+    <button class="secondary" id="btnRefresh">Refresh</button>
+    <button class="secondary" id="btnExportCsv">Export CSV</button>
+    <button class="secondary" id="btnExportBackup">Export Backup (JSON)</button>
+    <button class="secondary" id="btnImportBackup">Import Backup (JSON)</button>
+
+    <label class="pill">
+      <input type="checkbox" id="chkSettlements" />
+      Include Balance Settlements in stats
+    </label>
+
+    <button class="secondary" id="btnResetSupplier">Reset Supplier Costs</button>
+    <button class="secondary" id="btnWalletSettings">Wallet Settings</button>
+    <button class="primary" id="btnWalletSync">Sync Wallet</button>
+  </div>
+
+  <textarea id="txt" placeholder="Paste wallet export here..."></textarea>
+  <div class="error" id="err"></div>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="wrap">
+    <table id="table">
+      <thead>
+        <tr>
+          <th></th>
+          <th>Order</th>
+          <th class="num">Gross</th>
+          <th class="num">Service</th>
+          <th class="num">VAT</th>
+          <th class="num">Incentive</th>
+          <th class="num">Merchant Payout</th>
+          <th class="num">Toters Margin</th>
+          <th class="num">Supplier Cost</th>
+          <th>Paid</th>
+          <th class="num">Net Profit</th>
+          <th class="num">Rows</th>
+          <th>Dates</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <script src="./renderer.js"></script>
+</body>
+</html>

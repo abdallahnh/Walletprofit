@@ -1,7 +1,7 @@
 {
   "name": "wallet-profit-app",
-  "version": "2.2.9",
-  "description": "Wallet profit data",
+  "version": "2.2.12",
+  "description": "Wallet profile data",
   "main": "src/main/main.js",
   "private": true,
   "scripts": {
@@ -9,7 +9,7 @@
     "dev": "electron .",
     "build": "electron-builder",
     "build:win": "electron-builder --win nsis --x64 --publish never",
-    "build:mac": "electron-builder --mac dmg --publish never",
+    "build:mac": "electron-builder --mac dmg",
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
@@ -22,8 +22,6 @@
   "build": {
     "appId": "com.wallet.profit",
     "productName": "ANWallet",
-    "asar": true,
-    "npmRebuild": true,
     "directories": {
       "output": "dist",
       "buildResources": "build"
@@ -35,15 +33,19 @@
     ],
     "mac": {
       "icon": "build/icon.icns",
-      "target": ["dmg"],
-      "category": "public.app-category.business"
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.medical"
     },
     "win": {
       "icon": "build/icon.ico",
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },
