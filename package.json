@@ -1,6 +1,6 @@
 {
   "name": "wallet-profit-app",
-  "version": "2.2.12",
+  "version": "2.2.13",
   "description": "Wallet profile data",
   "main": "src/main/main.js",
   "private": true,
