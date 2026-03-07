@@ -7,6 +7,9 @@ const tbody = $("tbody");
 
 const chkSettlements = $("chkSettlements");
 
+const salesFrom = $("salesFrom");
+const salesTo = $("salesTo");
+
 // Wallet modal elements
 const walletBackdrop = $("walletModalBackdrop");
 const walletModal = $("walletModal");
@@ -252,6 +255,34 @@ chkSettlements.addEventListener("change", () => {
   refresh().catch(setError);
 });
 
+$("btnGenerateSales").addEventListener("click", async () => {
+  try {
+    const from = salesFrom.value || null;
+    const to = salesTo.value || null;
+    const rows = await window.api.salesReport({ from, to });
+    const totalProfit = rows.reduce((sum, r) => sum + (Number(r.profit_usd || 0)), 0);
+    alert(
+      `Sales rows: ${rows.length}\nTotal profit (USD): ${totalProfit.toFixed(2)}`
+    );
+  } catch (e) {
+    setError(e);
+  }
+});
+
+$("btnExportSalesExcel").addEventListener("click", async () => {
+  try {
+    const from = salesFrom.value || null;
+    const to = salesTo.value || null;
+    const res = await window.api.salesExportExcel({ from, to });
+    if (res && res.ok) {
+      alert(`Sales report exported to: ${res.path}`);
+    } else if (!res?.canceled) {
+      setError(res?.error || "Export failed");
+    }
+  } catch (e) {
+    setError(e);
+  }
+});
 
 // Initial load
 refresh().catch(setError);

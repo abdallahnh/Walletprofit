@@ -21,13 +21,16 @@ contextBridge.exposeInMainWorld("api", {
   walletGetConfig: () => ipcRenderer.invoke("wallet:getConfig"),
   walletSaveConfig: (cfg) => ipcRenderer.invoke("wallet:saveConfig", cfg),
   walletSync: () => ipcRenderer.invoke("wallet:sync"),
-openOrder: (code) => ipcRenderer.invoke("open-order", code),
+  openOrder: (code) => ipcRenderer.invoke("open-order", code),
 
-openProducts: () => ipcRenderer.invoke("open-products"),
+  openProducts: () => ipcRenderer.invoke("open-products"),
 
+  // Products
   productsGet: () => ipcRenderer.invoke("products:get"),
-
   productsImport: (rows) => ipcRenderer.invoke("products:import", rows),
-productsImportExcel: () =>
-  ipcRenderer.invoke("products:importExcel")
+  productsImportExcel: () => ipcRenderer.invoke("products:importExcel"),
+
+  // Sales reports
+  salesReport: (opts) => ipcRenderer.invoke("sales:report", opts || {}),
+  salesExportExcel: (opts) => ipcRenderer.invoke("sales:exportExcel", opts || {}),
 });

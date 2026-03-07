@@ -1,4 +1,5 @@
 const { getOrders, getOrderDetails } = require("./totersApi");
+const { recordOrderItemsToSales } = require("../db/sales");
 
 // We keep both an array and a map for fast lookup
 let cachedOrders = [];
@@ -7,11 +8,11 @@ let cachedByCode = new Map();
 async function syncOrders(storeId) {
   const result = await getOrders(storeId);
 
-  // Your /orders response shape is: { errors:false, data:{ orders:{ data:[...] } } }
-  const list = result?.data?.orders?.data ?? result?.orders?.data ?? result?.data ?? result ?? [];
+  const list =
+    result?.data?.orders?.data ?? result?.orders?.data ?? result?.data ?? result ?? [];
 
   cachedOrders = Array.isArray(list) ? list : [];
-  cachedByCode = new Map(cachedOrders.map(o => [o.code, o]));
+  cachedByCode = new Map(cachedOrders.map((o) => [o.code, o]));
 
   return cachedOrders;
 }
@@ -25,15 +26,17 @@ async function loadDetailsByCode(code) {
   if (!summary?.id) return null;
 
   const details = await getOrderDetails(summary.id);
-  const detailedOrder =
-    details?.data?.orders || details;
+  const detailedOrder = details?.data?.orders || details;
 
   const finalOrder = {
-    ...detailedOrder,   // first load detailed
-    ...summary,         // THEN overwrite with summary (address safe)
-    order_detail: detailedOrder?.order_detail || []
+    ...detailedOrder,
+    ...summary,
+    order_detail: detailedOrder?.order_detail || [],
   };
-  processOrderItems(finalOrder);
+
+  // When we load an order, reconcile inventory and sales
+  recordOrderItemsToSales(finalOrder);
+
   return finalOrder;
 }
 

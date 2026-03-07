@@ -1,11 +1,18 @@
 // src/main/main.js
 const { app, BrowserWindow, ipcMain, dialog, Menu } = require("electron");
 const path = require("path");
+const XLSX = require("xlsx");
+
+const database = require("../db/database");
+const walletDb = require("../db/wallet");
+const ordersDb = require("../db/orders");
+const productsDb = require("../db/products");
+const salesDb = require("../db/sales");
+
+const logger = require("../utils/logger");
+
 const { syncOrders, loadDetailsByCode } = require("../services/orderService");
 const { setAuthToken } = require("../services/totersApi");
-const XLSX = require("xlsx");
-// IMPORTANT: with your new structure, db.js is in src/render
-const db = require("../render/db");
 
 function buildAppMenu(win) {
   const isMac = process.platform === "darwin";
@@ -108,7 +115,9 @@ function createWindow() {
 
 app.whenReady().then(() => {
   // DB should ALWAYS be in userData so it persists
-  db.initDb(app.getPath("userData"));
+  const userData = app.getPath("userData");
+  logger.setLogFile(userData);
+  database.initDatabase(userData);
   createWindow();
 });
 
@@ -121,14 +130,37 @@ app.on("activate", () => {
 });
 
 // IPC
-ipcMain.handle("import:tsv", (_, text) => db.importTransactionsText(text));
-ipcMain.handle("orders:get", (_, opts) => db.getOrdersReconciliation(opts || {}));
-ipcMain.handle("totals:get", (_, opts) => db.getTotals(opts || {}));
-ipcMain.handle("orderMeta:set", (_, payload) => db.upsertOrderMeta(payload));
-ipcMain.handle("supplier:reset", () => db.resetSupplierMeta());
+ipcMain.handle("import:tsv", async (_evt, text) => {
+  try {
+    return walletDb.importWalletTsv(text);
+  } catch (e) {
+    return { ok: false, error: String(e && e.message ? e.message : e) };
+  }
+});
 
-ipcMain.handle("export:csv", async () => db.exportOrdersCsv());
-ipcMain.handle("backup:export", async () => db.exportBackupJson());
+ipcMain.handle("orders:get", async () => {
+  return ordersDb.getOrdersReconciliation();
+});
+
+ipcMain.handle("totals:get", async (_evt, opts) => {
+  return ordersDb.getTotals(opts || {});
+});
+
+ipcMain.handle("orderMeta:set", async (_evt, payload) => {
+  return ordersDb.upsertOrderMeta(payload);
+});
+
+ipcMain.handle("supplier:reset", async () => {
+  return ordersDb.resetSupplierMeta();
+});
+
+ipcMain.handle("export:csv", async () => {
+  return ordersDb.exportOrdersCsv();
+});
+
+ipcMain.handle("backup:export", async () => {
+  return walletDb.exportBackupJson();
+});
 
 ipcMain.handle("backup:import", async () => {
   const res = await dialog.showOpenDialog({
@@ -136,11 +168,11 @@ ipcMain.handle("backup:import", async () => {
     filters: [{ name: "JSON", extensions: ["json"] }],
   });
   if (res.canceled || !res.filePaths?.length) return { ok: false, error: "Canceled" };
-  return db.importBackupJsonFromFile(res.filePaths[0]);
+  return walletDb.importBackupJsonFromFile(res.filePaths[0]);
 });
 
 ipcMain.handle("open-order", async (_, orderCode) => {
-  const cfg = db.getWalletConfig();
+  const cfg = walletDb.getWalletConfig();
   if (!cfg?.token || !cfg?.storeId) {
     return;
   }
@@ -211,45 +243,91 @@ ipcMain.handle("products:importExcel", async () => {
   const workbook = XLSX.readFile(filePaths[0]);
 
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const raw = XLSX.utils.sheet_to_json(sheet);
 
- const raw = XLSX.utils.sheet_to_json(sheet);
+  // normalize keys (remove spaces, lowercase, underscores)
+  const data = raw.map((row) => {
+    const normalized = {};
+    for (const key in row) {
+      const cleanKey = key
+        .toLowerCase()
+        .replace(/\s+/g, "")
+        .replace(/_/g, "");
+      normalized[cleanKey] = row[key];
+    }
+    return normalized;
+  });
 
-// normalize keys (remove spaces, lowercase)
-const data = raw.map(row => {
-  const normalized = {};
-  for (const key in row) {
-    const cleanKey = key
-      .toLowerCase()
-      .replace(/\s+/g, "")       // remove spaces
-      .replace(/_/g, "");        // remove underscores
+  const rows = data.map((r) => ({
+    barcode: r.barcode,
+    sku: r.sku || "",
+    item_name: r.itemname,
+    brand: r.brand || "",
+    category: r.category,
+    sub_category: r.subcategory,
+    unit_price_usd: r.unitpriceusd || 0,
+    cost_usd: r.unitpriceusd || 0,
+    measurement_unit: r.measurementunit,
+    measurement_value: r.measurementvalue,
+    description: r.description,
+    image_url: r.urlimages,
+    stock_quantity: r.quantity || 0,
+  }));
 
-    normalized[cleanKey] = row[key];
+  return productsDb.importProducts(rows);
+
+});
+
+ipcMain.handle("wallet:getConfig", () => walletDb.getWalletConfig());
+ipcMain.handle("wallet:saveConfig", (_evt, cfg) => walletDb.saveWalletConfig(cfg));
+ipcMain.handle("wallet:sync", () => walletDb.syncWallet());
+
+ipcMain.handle("products:import", (_evt, rows) => productsDb.importProducts(rows));
+ipcMain.handle("products:get", () => productsDb.getProducts());
+
+ipcMain.handle("sales:report", (_evt, opts) => {
+  return salesDb.getSalesReport(opts || {});
+});
+
+ipcMain.handle("sales:exportExcel", async (_evt, opts) => {
+  const rows = salesDb.getSalesReport(opts || {});
+
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    title: "Export Sales Report",
+    defaultPath: (() => {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, "0");
+      return `sales-report-${year}-${month}.xlsx`;
+    })(),
+    filters: [{ name: "Excel", extensions: ["xlsx"] }],
+  });
+
+  if (canceled || !filePath) {
+    return { ok: false, canceled: true };
   }
-  return normalized;
+
+  const workbook = XLSX.utils.book_new();
+
+  const sheetData = rows.map((r) => ({
+    Barcode: r.barcode,
+    "Item Name": r.item_name,
+    "Unit Price USD": r.unit_price_usd,
+    "Unit Price L.L.": r.unit_price_ll,
+    "Cost USD": r.cost_usd,
+    "Cost L.L.": r.cost_ll,
+    "Profit Rate": r.profit_rate,
+    Quantity: r.quantity,
+    "Total Price (USD)": r.total_price_usd,
+    "Total Cost (USD)": r.total_cost_usd,
+    "Profit (USD)": r.profit_usd,
+    Brand: r.brand,
+    "Created At": r.created_at,
+  }));
+
+  const sheet = XLSX.utils.json_to_sheet(sheetData);
+  XLSX.utils.book_append_sheet(workbook, sheet, "Sales");
+  XLSX.writeFile(workbook, filePath);
+
+  return { ok: true, path: filePath, rows: rows.length };
 });
-
- const rows = data.map(r => ({
-  barcode: r.barcode,
-  sku: r.sku || "",
-  item_name: r.itemname,
-  brand: r.brand || "",
-  category: r.category,
-  sub_category: r.subcategory,
-  unit_price_usd: r.unitpriceusd || 0,
-  cost_usd: r.unitpriceusd || 0,
-  measurement_unit: r.measurementunit,
-  measurement_value: r.measurementvalue,
-  description: r.description,
-  image_url: r.urlimages,
-  stock_quantity: r.quantity || 0
-}));
-
-  return db.importProducts(rows);
-
-});
-
-ipcMain.handle("wallet:getConfig", () => db.getWalletConfig());
-ipcMain.handle("wallet:saveConfig", (_, cfg) => db.saveWalletConfig(cfg));
-ipcMain.handle("wallet:sync", () => db.syncWallet());
-ipcMain.handle("products:import", (_, rows) => db.importProducts(rows));
-ipcMain.handle("products:get", () => db.getProducts());

@@ -107,11 +107,11 @@ td.num, th.num {
   </div>
 
   <div class="row">
-    <button class="primary" id="btnImport">Import / Merge</button>
+    <button class="primary" id="btnImport">Import TSV</button>
     <button class="secondary" id="btnRefresh">Refresh</button>
     <button class="secondary" id="btnExportCsv">Export CSV</button>
-    <button class="secondary" id="btnExportBackup">Export Backup (JSON)</button>
-    <button class="secondary" id="btnImportBackup">Import Backup (JSON)</button>
+    <button class="secondary" id="btnExportBackup">Export Backup</button>
+    <button class="secondary" id="btnImportBackup">Import Backup</button>
 
     <label class="pill">
       <input type="checkbox" id="chkSettlements" />
@@ -122,6 +122,17 @@ td.num, th.num {
     <button class="secondary" id="btnWalletSettings">Wallet Settings</button>
     <button class="primary" id="btnWalletSync">Sync Wallet</button>
     <button id="btnProducts">Products</button>
+  </div>
+
+  <div class="row">
+    <label>From
+      <input class="inp" type="date" id="salesFrom" />
+    </label>
+    <label>To
+      <input class="inp" type="date" id="salesTo" />
+    </label>
+    <button class="secondary" id="btnGenerateSales">Generate Sales Report</button>
+    <button class="secondary" id="btnExportSalesExcel">Export Excel</button>
   </div>
 
   <textarea id="txt" placeholder="Paste wallet export here..."></textarea>
