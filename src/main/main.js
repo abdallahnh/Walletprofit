@@ -3,7 +3,7 @@ const { app, BrowserWindow, ipcMain, dialog, Menu } = require("electron");
 const path = require("path");
 const { syncOrders, loadDetailsByCode } = require("../services/orderService");
 const { setAuthToken } = require("../services/totersApi");
-
+const XLSX = require("xlsx");
 // IMPORTANT: with your new structure, db.js is in src/render
 const db = require("../render/db");
 
@@ -145,6 +145,8 @@ ipcMain.handle("open-order", async (_, orderCode) => {
     return;
   }
 
+
+
   setAuthToken(cfg.token);
 
   await syncOrders(cfg.storeId);
@@ -170,6 +172,84 @@ ipcMain.handle("open-order", async (_, orderCode) => {
   });
 });
 
+ipcMain.handle("open-products", () => {
+
+  const { preloadJs } = resolveRendererPaths();
+
+  const productsPath = path.join(
+    app.getAppPath(),
+    "src",
+    "render",
+    "products.html"
+  );
+
+  const win = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    webPreferences: {
+      preload: preloadJs,
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+
+  console.log("Opening products page:", productsPath);
+
+  win.loadFile(productsPath);
+
+});
+
+ipcMain.handle("products:importExcel", async () => {
+
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    properties: ["openFile"],
+    filters: [{ name: "Excel", extensions: ["xlsx"] }]
+  });
+
+  if (canceled) return null;
+
+  const workbook = XLSX.readFile(filePaths[0]);
+
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+
+ const raw = XLSX.utils.sheet_to_json(sheet);
+
+// normalize keys (remove spaces, lowercase)
+const data = raw.map(row => {
+  const normalized = {};
+  for (const key in row) {
+    const cleanKey = key
+      .toLowerCase()
+      .replace(/\s+/g, "")       // remove spaces
+      .replace(/_/g, "");        // remove underscores
+
+    normalized[cleanKey] = row[key];
+  }
+  return normalized;
+});
+
+ const rows = data.map(r => ({
+  barcode: r.barcode,
+  sku: r.sku || "",
+  item_name: r.itemname,
+  brand: r.brand || "",
+  category: r.category,
+  sub_category: r.subcategory,
+  unit_price_usd: r.unitpriceusd || 0,
+  cost_usd: r.unitpriceusd || 0,
+  measurement_unit: r.measurementunit,
+  measurement_value: r.measurementvalue,
+  description: r.description,
+  image_url: r.urlimages,
+  stock_quantity: r.quantity || 0
+}));
+
+  return db.importProducts(rows);
+
+});
+
 ipcMain.handle("wallet:getConfig", () => db.getWalletConfig());
 ipcMain.handle("wallet:saveConfig", (_, cfg) => db.saveWalletConfig(cfg));
 ipcMain.handle("wallet:sync", () => db.syncWallet());
+ipcMain.handle("products:import", (_, rows) => db.importProducts(rows));
+ipcMain.handle("products:get", () => db.getProducts());

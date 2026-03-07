@@ -28,11 +28,13 @@ async function loadDetailsByCode(code) {
   const detailedOrder =
     details?.data?.orders || details;
 
-  return {
+  const finalOrder = {
     ...detailedOrder,   // first load detailed
     ...summary,         // THEN overwrite with summary (address safe)
     order_detail: detailedOrder?.order_detail || []
   };
+  processOrderItems(finalOrder);
+  return finalOrder;
 }
 
 module.exports = { syncOrders, loadDetailsByCode };

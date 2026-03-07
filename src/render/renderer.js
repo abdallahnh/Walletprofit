@@ -82,6 +82,10 @@ function renderRows(rows) {
     tbody.appendChild(tr);
   }
 
+  document.getElementById("btnProducts").addEventListener("click", () => {
+  window.api.openProducts();
+});
+
   document.querySelectorAll(".view-btn").forEach(btn => {
   btn.addEventListener("click", () => {
     const code = btn.getAttribute("data-code");

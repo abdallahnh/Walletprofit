@@ -37,6 +37,49 @@ function initDb(userDataPath) {
       value TEXT
     );
   `);
+  db.exec(`
+CREATE TABLE IF NOT EXISTS products (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  barcode TEXT UNIQUE,
+  item_name TEXT,
+  sku TEXT,
+  brand TEXT,
+  category TEXT,
+  sub_category TEXT,
+
+  unit_price_usd REAL,
+  cost_usd REAL,
+
+  measurement_unit TEXT,
+  measurement_value TEXT,
+
+  description TEXT,
+  image_url TEXT,
+
+  stock_quantity INTEGER DEFAULT 0,
+
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+`);
+
+  db.exec(`
+CREATE TABLE IF NOT EXISTS sales (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_code TEXT,
+  barcode TEXT,
+  product_id INTEGER,
+
+  quantity INTEGER,
+  unit_price REAL,
+  cost REAL,
+
+  total_sale REAL,
+  profit REAL,
+
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+`);
 
   // Default wallet config
   const existing = db.prepare("SELECT value FROM config WHERE key=?").get("walletConfig");
@@ -48,6 +91,111 @@ function initDb(userDataPath) {
       token: ""
     });
   }
+}
+function findProductByBarcode(barcode) {
+  return db.prepare(`
+    SELECT *
+    FROM products
+    WHERE barcode = ?
+  `).get(barcode);
+}
+
+function reduceStock(barcode, qty) {
+  db.prepare(`
+    UPDATE products
+    SET stock_quantity = stock_quantity - ?
+    WHERE barcode = ?
+  `).run(qty, barcode);
+}
+
+function insertSale(data) {
+
+  db.prepare(`
+    INSERT INTO sales (
+      order_code,
+      barcode,
+      product_id,
+      quantity,
+      unit_price,
+      cost,
+      total_sale,
+      profit
+    )
+    VALUES (?,?,?,?,?,?,?,?)
+  `).run(
+    data.order_code,
+    data.barcode,
+    data.product_id,
+    data.quantity,
+    data.unit_price,
+    data.cost,
+    data.total_sale,
+    data.profit
+  );
+
+}
+
+function importProducts(rows) {
+
+  const stmt = db.prepare(`
+    INSERT INTO products (
+      barcode,
+      item_name,
+      sku,
+      brand,
+      category,
+      sub_category,
+      unit_price_usd,
+      cost_usd,
+      measurement_unit,
+      measurement_value,
+      description,
+      image_url,
+      stock_quantity,
+      updated_at
+    )
+    VALUES (
+      @barcode,
+      @item_name,
+      @sku,
+      @brand,
+      @category,
+      @sub_category,
+      @unit_price_usd,
+      @cost_usd,
+      @measurement_unit,
+      @measurement_value,
+      @description,
+      @image_url,
+      @stock_quantity,
+      datetime('now')
+    )
+
+    ON CONFLICT(barcode) DO UPDATE SET
+      item_name = excluded.item_name,
+      sku = excluded.sku,
+      brand = excluded.brand,
+      category = excluded.category,
+      sub_category = excluded.sub_category,
+      unit_price_usd = excluded.unit_price_usd,
+      cost_usd = excluded.cost_usd,
+      measurement_unit = excluded.measurement_unit,
+      measurement_value = excluded.measurement_value,
+      description = excluded.description,
+      image_url = excluded.image_url,
+      stock_quantity = excluded.stock_quantity,
+      updated_at = datetime('now')
+  `);
+
+  const insertMany = db.transaction((rows) => {
+    for (const r of rows) {
+      stmt.run(r);
+    }
+  });
+
+  insertMany(rows);
+
+  return { count: rows.length };
 }
 
 function extractOrderCode(reason) {
@@ -278,6 +426,46 @@ function getTotals(opts = {}) {
   return totals;
 }
 
+function processOrderItems(order) {
+
+  const items = order.order_detail || [];
+
+  items.forEach(d => {
+
+    const item = d.item || {};
+
+    const barcode = item.barcode;
+
+    if (!barcode) return;
+
+    const product = findProductByBarcode(barcode);
+
+    if (!product) return;
+
+    const qty = Number(d.quantity || 0);
+    const price = Number(d.item_price || 0);
+
+    const total = qty * price;
+    const cost = product.cost_usd * qty;
+    const profit = total - cost;
+
+    insertSale({
+      order_code: order.code,
+      barcode,
+      product_id: product.id,
+      quantity: qty,
+      unit_price: price,
+      cost,
+      total_sale: total,
+      profit
+    });
+
+    reduceStock(barcode, qty);
+
+  });
+
+}
+
 function exportOrdersCsv() {
   const { orders } = computeOrders();
   const header = [
@@ -479,6 +667,13 @@ console.log("NEXT URL =", nextUrl);
 
   return { ok: true, pages, totalFetched, totalInserted, totalIgnored };
 }
+function getProducts() {
+  return db.prepare(`
+    SELECT *
+    FROM products
+    ORDER BY item_name
+  `).all();
+}
 
 module.exports = {
   initDb,
@@ -492,7 +687,9 @@ module.exports = {
   importBackupJsonFromFile,
   getWalletConfig,
   saveWalletConfig,
-  syncWallet
+  syncWallet,
+  importProducts,
+  getProducts
 };
 
 function withWallet(urlStr, wallet) {
