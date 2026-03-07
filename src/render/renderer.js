@@ -260,10 +260,8 @@ $("btnGenerateSales").addEventListener("click", async () => {
     const from = salesFrom.value || null;
     const to = salesTo.value || null;
     const rows = await window.api.salesReport({ from, to });
-    const totalProfit = rows.reduce((sum, r) => sum + (Number(r.profit_usd || 0)), 0);
-    alert(
-      `Sales rows: ${rows.length}\nTotal profit (USD): ${totalProfit.toFixed(2)}`
-    );
+    const totalProfit = rows.reduce((sum, r) => sum + (Number(r.profit || 0)), 0);
+    alert(`Products: ${rows.length}\nTotal profit (USD): ${totalProfit.toFixed(2)}`);
   } catch (e) {
     setError(e);
   }
@@ -279,6 +277,20 @@ $("btnExportSalesExcel").addEventListener("click", async () => {
     } else if (!res?.canceled) {
       setError(res?.error || "Export failed");
     }
+  } catch (e) {
+    setError(e);
+  }
+});
+
+$("btnSyncSales").addEventListener("click", async () => {
+  try {
+    setError("");
+    const res = await window.api.salesSyncFromOrders();
+    if (!res?.ok) {
+      setError(res?.error || "Sync sales failed");
+      return;
+    }
+    alert(`Synced sales from orders. Processed orders: ${res.processed}`);
   } catch (e) {
     setError(e);
   }

@@ -33,4 +33,5 @@ contextBridge.exposeInMainWorld("api", {
   // Sales reports
   salesReport: (opts) => ipcRenderer.invoke("sales:report", opts || {}),
   salesExportExcel: (opts) => ipcRenderer.invoke("sales:exportExcel", opts || {}),
+  salesSyncFromOrders: () => ipcRenderer.invoke("sales:syncFromOrders"),
 });

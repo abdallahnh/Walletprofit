@@ -75,6 +75,9 @@ function initDatabase(userDataPath) {
       profit REAL,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_order_barcode
+      ON sales(order_code, barcode);
   `);
 
   // Ensure a default wallet config row exists

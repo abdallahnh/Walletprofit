@@ -12,7 +12,7 @@ const salesDb = require("../db/sales");
 const logger = require("../utils/logger");
 
 const { syncOrders, loadDetailsByCode } = require("../services/orderService");
-const { setAuthToken } = require("../services/totersApi");
+const { setAuthToken, setBaseUrl } = require("../services/totersApi");
 
 function buildAppMenu(win) {
   const isMac = process.platform === "darwin";
@@ -177,8 +177,7 @@ ipcMain.handle("open-order", async (_, orderCode) => {
     return;
   }
 
-
-
+  setBaseUrl(cfg.baseUrl);
   setAuthToken(cfg.token);
 
   await syncOrders(cfg.storeId);
@@ -289,6 +288,31 @@ ipcMain.handle("sales:report", (_evt, opts) => {
   return salesDb.getSalesReport(opts || {});
 });
 
+ipcMain.handle("sales:syncFromOrders", async () => {
+  const cfg = walletDb.getWalletConfig();
+  if (!cfg?.token || !cfg?.storeId) {
+    return { ok: false, error: "Missing wallet config (baseUrl / storeId / token)" };
+  }
+
+  setBaseUrl(cfg.baseUrl);
+  setAuthToken(cfg.token);
+
+  const list = await syncOrders(cfg.storeId);
+
+  let processed = 0;
+
+  for (const o of list || []) {
+    try {
+      await loadDetailsByCode(o.code);
+      processed += 1;
+    } catch (e) {
+      logger.error("Failed to sync order to sales", { code: o.code, error: String(e) });
+    }
+  }
+
+  return { ok: true, processed };
+});
+
 ipcMain.handle("sales:exportExcel", async (_evt, opts) => {
   const rows = salesDb.getSalesReport(opts || {});
 
@@ -312,17 +336,11 @@ ipcMain.handle("sales:exportExcel", async (_evt, opts) => {
   const sheetData = rows.map((r) => ({
     Barcode: r.barcode,
     "Item Name": r.item_name,
-    "Unit Price USD": r.unit_price_usd,
-    "Unit Price L.L.": r.unit_price_ll,
-    "Cost USD": r.cost_usd,
-    "Cost L.L.": r.cost_ll,
-    "Profit Rate": r.profit_rate,
-    Quantity: r.quantity,
-    "Total Price (USD)": r.total_price_usd,
-    "Total Cost (USD)": r.total_cost_usd,
-    "Profit (USD)": r.profit_usd,
     Brand: r.brand,
-    "Created At": r.created_at,
+    "Sold Qty": r.sold_qty,
+    "Revenue (USD)": r.revenue,
+    "Supplier Cost (USD)": r.supplier_cost,
+    "Profit (USD)": r.profit,
   }));
 
   const sheet = XLSX.utils.json_to_sheet(sheetData);

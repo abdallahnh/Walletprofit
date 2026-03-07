@@ -1,25 +1,14 @@
 const { getDb } = require("./database");
 const { findProductByBarcode } = require("./products");
 
-const USD_TO_LL = 90000;
-
-function reduceStock(barcode, qty) {
+function recordOrderItemsToSales(order) {
   const db = getDb();
-  db.prepare(
-    `
-    UPDATE products
-    SET stock_quantity = stock_quantity - ?
-    WHERE barcode = ?
-  `
-  ).run(qty, barcode);
-}
+  const items = order.order_detail || [];
+  if (!items.length) return;
 
-function insertSale(data) {
-  const db = getDb();
-
-  db.prepare(
+  const insertStmt = db.prepare(
     `
-    INSERT INTO sales (
+    INSERT OR IGNORE INTO sales (
       order_code,
       barcode,
       product_id,
@@ -27,53 +16,59 @@ function insertSale(data) {
       unit_price,
       cost,
       total_sale,
-      profit
-    )
-    VALUES (?,?,?,?,?,?,?,?)
-  `
-  ).run(
-    data.order_code,
-    data.barcode,
-    data.product_id,
-    data.quantity,
-    data.unit_price,
-    data.cost,
-    data.total_sale,
-    data.profit
-  );
-}
-
-function recordOrderItemsToSales(order) {
-  const items = order.order_detail || [];
-
-  for (const d of items) {
-    const item = d.item || {};
-    const barcode = item.barcode;
-    if (!barcode) continue;
-
-    const product = findProductByBarcode(barcode);
-    if (!product) continue;
-
-    const qty = Number(d.quantity || 0);
-    const price = Number(d.item_price || 0);
-
-    const total = qty * price;
-    const cost = (product.cost_usd || 0) * qty;
-    const profit = total - cost;
-
-    insertSale({
-      order_code: order.code,
-      barcode,
-      product_id: product.id,
-      quantity: qty,
-      unit_price: price,
-      cost,
-      total_sale: total,
       profit,
-    });
+      created_at
+    )
+    VALUES (?,?,?,?,?,?,?,?,?)
+  `
+  );
 
-    reduceStock(barcode, qty);
-  }
+  const updateStockStmt = db.prepare(
+    `
+    UPDATE products
+    SET stock_quantity = stock_quantity - ?
+    WHERE barcode = ?
+  `
+  );
+
+  const createdAt = order.created_at || new Date().toISOString();
+
+  const runTx = db.transaction(() => {
+    for (const d of items) {
+      const item = d.item || {};
+      const barcode = item.barcode;
+      if (!barcode) continue;
+
+      const product = findProductByBarcode(barcode);
+      if (!product) continue;
+
+      const qty = Number(d.quantity || 0);
+      const price = Number(d.item_price || 0);
+
+      const total = qty * price;
+      const cost = (product.cost_usd || 0) * qty;
+      const profit = total - cost;
+
+      const info = insertStmt.run(
+        order.code,
+        barcode,
+        product.id,
+        qty,
+        price,
+        cost,
+        total,
+        profit,
+        createdAt
+      );
+
+      // Only reduce stock if we actually inserted a new sales row
+      if (info.changes === 1) {
+        updateStockStmt.run(qty, barcode);
+      }
+    }
+  });
+
+  runTx();
 }
 
 function getSalesReport(opts = {}) {
@@ -83,11 +78,13 @@ function getSalesReport(opts = {}) {
   const params = [];
   const where = [];
 
-  if (from) {
+  if (from && to) {
+    where.push("datetime(s.created_at) BETWEEN datetime(?) AND datetime(?)");
+    params.push(from, to);
+  } else if (from) {
     where.push("datetime(s.created_at) >= datetime(?)");
     params.push(from);
-  }
-  if (to) {
+  } else if (to) {
     where.push("datetime(s.created_at) <= datetime(?)");
     params.push(to);
   }
@@ -98,53 +95,31 @@ function getSalesReport(opts = {}) {
     .prepare(
       `
     SELECT
-      s.*,
-      p.barcode AS product_barcode,
+      p.barcode,
       p.item_name,
       p.brand,
-      p.unit_price_usd AS product_unit_price_usd,
-      p.cost_usd AS product_cost_usd
+      SUM(s.quantity) AS sold_qty,
+      SUM(s.total_sale) AS revenue,
+      SUM(s.cost) AS supplier_cost,
+      SUM(s.profit) AS profit
     FROM sales s
-    LEFT JOIN products p ON s.product_id = p.id
+    JOIN products p ON s.product_id = p.id
     ${whereSql}
-    ORDER BY s.created_at ASC, p.item_name ASC
+    GROUP BY p.barcode, p.item_name, p.brand
+    ORDER BY sold_qty DESC
   `
     )
     .all(...params);
 
-  return rows.map((row) => {
-    const unitPriceUsd = row.unit_price != null ? Number(row.unit_price) : Number(row.product_unit_price_usd || 0);
-    const totalSaleUsd = row.total_sale != null ? Number(row.total_sale) : unitPriceUsd * Number(row.quantity || 0);
-    const costPerUnitUsd =
-      row.cost != null && row.quantity
-        ? Number(row.cost) / Number(row.quantity)
-        : Number(row.product_cost_usd || 0);
-    const totalCostUsd =
-      row.cost != null ? Number(row.cost) : costPerUnitUsd * Number(row.quantity || 0);
-    const profitUsd =
-      row.profit != null ? Number(row.profit) : totalSaleUsd - totalCostUsd;
-
-    const unitPriceLL = unitPriceUsd * USD_TO_LL;
-    const costPerUnitLL = costPerUnitUsd * USD_TO_LL;
-
-    const profitRate = unitPriceUsd ? (unitPriceUsd - costPerUnitUsd) / unitPriceUsd : 0;
-
-    return {
-      barcode: row.product_barcode || row.barcode,
-      item_name: row.item_name || "",
-      brand: row.brand || "",
-      quantity: Number(row.quantity || 0),
-      unit_price_usd: unitPriceUsd,
-      unit_price_ll: unitPriceLL,
-      cost_usd: costPerUnitUsd,
-      cost_ll: costPerUnitLL,
-      profit_rate: profitRate,
-      total_price_usd: totalSaleUsd,
-      total_cost_usd: totalCostUsd,
-      profit_usd: profitUsd,
-      created_at: row.created_at,
-    };
-  });
+  return rows.map((row) => ({
+    barcode: row.barcode,
+    item_name: row.item_name,
+    brand: row.brand,
+    sold_qty: Number(row.sold_qty || 0),
+    revenue: Number(row.revenue || 0),
+    supplier_cost: Number(row.supplier_cost || 0),
+    profit: Number(row.profit || 0),
+  }));
 }
 
 module.exports = {
