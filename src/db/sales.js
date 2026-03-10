@@ -122,8 +122,241 @@ function getSalesReport(opts = {}) {
   }));
 }
 
+function getRevenueByPeriod(opts = {}) {
+  const db = getDb();
+  const { from, to, period = 'day' } = opts;
+
+  let dateFormat;
+  switch (period) {
+    case 'month':
+      dateFormat = "strftime('%Y-%m', s.created_at)";
+      break;
+    case 'week':
+      dateFormat = "strftime('%Y-%W', s.created_at)";
+      break;
+    case 'day':
+    default:
+      dateFormat = "strftime('%Y-%m-%d', s.created_at)";
+      break;
+  }
+
+  const params = [];
+  const where = [];
+
+  if (from && to) {
+    where.push("datetime(s.created_at) BETWEEN datetime(?) AND datetime(?)");
+    params.push(from, to);
+  } else if (from) {
+    where.push("datetime(s.created_at) >= datetime(?)");
+    params.push(from);
+  } else if (to) {
+    where.push("datetime(s.created_at) <= datetime(?)");
+    params.push(to);
+  }
+
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+  const rows = db
+    .prepare(
+      `
+    SELECT
+      ${dateFormat} AS period,
+      SUM(s.total_sale) AS revenue,
+      SUM(s.cost) AS cost,
+      SUM(s.profit) AS profit,
+      SUM(s.quantity) AS quantity_sold,
+      COUNT(DISTINCT s.order_code) AS order_count
+    FROM sales s
+    ${whereSql}
+    GROUP BY ${dateFormat}
+    ORDER BY ${dateFormat}
+  `
+    )
+    .all(...params);
+
+  return rows.map((row) => ({
+    period: row.period,
+    revenue: Number(row.revenue || 0),
+    cost: Number(row.cost || 0),
+    profit: Number(row.profit || 0),
+    quantity_sold: Number(row.quantity_sold || 0),
+    order_count: Number(row.order_count || 0),
+  }));
+}
+
+function getTopProductsByRevenue(opts = {}) {
+  const db = getDb();
+  const { from, to, limit = 10 } = opts;
+
+  const params = [];
+  const where = [];
+
+  if (from && to) {
+    where.push("datetime(s.created_at) BETWEEN datetime(?) AND datetime(?)");
+    params.push(from, to);
+  } else if (from) {
+    where.push("datetime(s.created_at) >= datetime(?)");
+    params.push(from);
+  } else if (to) {
+    where.push("datetime(s.created_at) <= datetime(?)");
+    params.push(to);
+  }
+
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+  const rows = db
+    .prepare(
+      `
+    SELECT
+      p.barcode,
+      p.item_name,
+      p.brand,
+      SUM(s.quantity) AS sold_qty,
+      SUM(s.total_sale) AS revenue,
+      SUM(s.cost) AS supplier_cost,
+      SUM(s.profit) AS profit
+    FROM sales s
+    JOIN products p ON s.product_id = p.id
+    ${whereSql}
+    GROUP BY p.barcode, p.item_name, p.brand
+    ORDER BY revenue DESC
+    LIMIT ?
+  `
+    )
+    .all(...params, limit);
+
+  return rows.map((row) => ({
+    barcode: row.barcode,
+    item_name: row.item_name,
+    brand: row.brand,
+    sold_qty: Number(row.sold_qty || 0),
+    revenue: Number(row.revenue || 0),
+    supplier_cost: Number(row.supplier_cost || 0),
+    profit: Number(row.profit || 0),
+  }));
+}
+
+function getTopProductsByProfit(opts = {}) {
+  const db = getDb();
+  const { from, to, limit = 10 } = opts;
+
+  const params = [];
+  const where = [];
+
+  if (from && to) {
+    where.push("datetime(s.created_at) BETWEEN datetime(?) AND datetime(?)");
+    params.push(from, to);
+  } else if (from) {
+    where.push("datetime(s.created_at) >= datetime(?)");
+    params.push(from);
+  } else if (to) {
+    where.push("datetime(s.created_at) <= datetime(?)");
+    params.push(to);
+  }
+
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+  const rows = db
+    .prepare(
+      `
+    SELECT
+      p.barcode,
+      p.item_name,
+      p.brand,
+      SUM(s.quantity) AS sold_qty,
+      SUM(s.total_sale) AS revenue,
+      SUM(s.cost) AS supplier_cost,
+      SUM(s.profit) AS profit
+    FROM sales s
+    JOIN products p ON s.product_id = p.id
+    ${whereSql}
+    GROUP BY p.barcode, p.item_name, p.brand
+    ORDER BY profit DESC
+    LIMIT ?
+  `
+    )
+    .all(...params, limit);
+
+  return rows.map((row) => ({
+    barcode: row.barcode,
+    item_name: row.item_name,
+    brand: row.brand,
+    sold_qty: Number(row.sold_qty || 0),
+    revenue: Number(row.revenue || 0),
+    supplier_cost: Number(row.supplier_cost || 0),
+    profit: Number(row.profit || 0),
+  }));
+}
+
+function getProfitMarginAnalysis(opts = {}) {
+  const db = getDb();
+  const { from, to, limit = 20 } = opts;
+
+  const params = [];
+  const where = [];
+
+  if (from && to) {
+    where.push("datetime(s.created_at) BETWEEN datetime(?) AND datetime(?)");
+    params.push(from, to);
+  } else if (from) {
+    where.push("datetime(s.created_at) >= datetime(?)");
+    params.push(from);
+  } else if (to) {
+    where.push("datetime(s.created_at) <= datetime(?)");
+    params.push(to);
+  }
+
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+  const rows = db
+    .prepare(
+      `
+    SELECT
+      p.barcode,
+      p.item_name,
+      p.brand,
+      p.unit_price_usd,
+      p.cost_usd,
+      SUM(s.quantity) AS sold_qty,
+      SUM(s.total_sale) AS revenue,
+      SUM(s.cost) AS supplier_cost,
+      SUM(s.profit) AS profit,
+      CASE 
+        WHEN SUM(s.total_sale) > 0 
+        THEN (SUM(s.profit) / SUM(s.total_sale)) * 100 
+        ELSE 0 
+      END AS profit_margin_percent
+    FROM sales s
+    JOIN products p ON s.product_id = p.id
+    ${whereSql}
+    GROUP BY p.barcode, p.item_name, p.brand, p.unit_price_usd, p.cost_usd
+    HAVING sold_qty > 0
+    ORDER BY profit_margin_percent DESC
+    LIMIT ?
+  `
+    )
+    .all(...params, limit);
+
+  return rows.map((row) => ({
+    barcode: row.barcode,
+    item_name: row.item_name,
+    brand: row.brand,
+    unit_price: Number(row.unit_price_usd || 0),
+    cost_price: Number(row.cost_usd || 0),
+    sold_qty: Number(row.sold_qty || 0),
+    revenue: Number(row.revenue || 0),
+    supplier_cost: Number(row.supplier_cost || 0),
+    profit: Number(row.profit || 0),
+    profit_margin_percent: Number(row.profit_margin_percent || 0),
+  }));
+}
+
 module.exports = {
   recordOrderItemsToSales,
   getSalesReport,
+  getRevenueByPeriod,
+  getTopProductsByRevenue,
+  getTopProductsByProfit,
+  getProfitMarginAnalysis,
 };
 

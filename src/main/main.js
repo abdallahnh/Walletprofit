@@ -231,6 +231,33 @@ ipcMain.handle("open-products", () => {
 
 });
 
+ipcMain.handle("open-revenue-dashboard", () => {
+
+  const { preloadJs } = resolveRendererPaths();
+
+  const dashboardPath = path.join(
+    app.getAppPath(),
+    "src",
+    "render",
+    "revenueDashboard.html"
+  );
+
+  const win = new BrowserWindow({
+    width: 1400,
+    height: 900,
+    webPreferences: {
+      preload: preloadJs,
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+
+  console.log("Opening revenue dashboard:", dashboardPath);
+
+  win.loadFile(dashboardPath);
+
+});
+
 ipcMain.handle("open-db-admin", () => {
   const { preloadJs } = resolveRendererPaths();
 
@@ -312,6 +339,22 @@ ipcMain.handle("products:get", () => productsDb.getProducts());
 
 ipcMain.handle("sales:report", (_evt, opts) => {
   return salesDb.getSalesReport(opts || {});
+});
+
+ipcMain.handle("sales:revenueByPeriod", (_evt, opts) => {
+  return salesDb.getRevenueByPeriod(opts || {});
+});
+
+ipcMain.handle("sales:topProductsByRevenue", (_evt, opts) => {
+  return salesDb.getTopProductsByRevenue(opts || {});
+});
+
+ipcMain.handle("sales:topProductsByProfit", (_evt, opts) => {
+  return salesDb.getTopProductsByProfit(opts || {});
+});
+
+ipcMain.handle("sales:profitMarginAnalysis", (_evt, opts) => {
+  return salesDb.getProfitMarginAnalysis(opts || {});
 });
 
 ipcMain.handle("sales:syncFromOrders", async () => {

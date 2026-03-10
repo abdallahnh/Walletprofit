@@ -90,6 +90,10 @@ function renderRows(rows) {
     window.api.openProducts();
   });
 
+  document.getElementById("btnRevenueDashboard").addEventListener("click", () => {
+    window.api.openRevenueDashboard();
+  });
+
   document.querySelectorAll(".view-btn").forEach(btn => {
   btn.addEventListener("click", () => {
     const code = btn.getAttribute("data-code");

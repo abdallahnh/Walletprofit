@@ -32,8 +32,15 @@ contextBridge.exposeInMainWorld("api", {
 
   // Sales reports
   salesReport: (opts) => ipcRenderer.invoke("sales:report", opts || {}),
+  salesRevenueByPeriod: (opts) => ipcRenderer.invoke("sales:revenueByPeriod", opts || {}),
+  salesTopProductsByRevenue: (opts) => ipcRenderer.invoke("sales:topProductsByRevenue", opts || {}),
+  salesTopProductsByProfit: (opts) => ipcRenderer.invoke("sales:topProductsByProfit", opts || {}),
+  salesProfitMarginAnalysis: (opts) => ipcRenderer.invoke("sales:profitMarginAnalysis", opts || {}),
   salesExportExcel: (opts) => ipcRenderer.invoke("sales:exportExcel", opts || {}),
   salesSyncFromOrders: () => ipcRenderer.invoke("sales:syncFromOrders"),
+
+  // Revenue Dashboard
+  openRevenueDashboard: () => ipcRenderer.invoke("open-revenue-dashboard"),
 
   // DB admin
   openDbAdmin: () => ipcRenderer.invoke("open-db-admin"),
