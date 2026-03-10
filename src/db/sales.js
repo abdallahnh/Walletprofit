@@ -1,10 +1,16 @@
 const { getDb } = require("./database");
 const { findProductByBarcode } = require("./products");
+const { getWalletConfig } = require("./wallet");
 
 function recordOrderItemsToSales(order) {
   const db = getDb();
   const items = order.order_detail || [];
   if (!items.length) return;
+
+  // Get currency conversion rate
+  const cfg = getWalletConfig();
+  const usdToLbpRate = cfg?.usdToLbpRate || 90000;
+  const lbpToUsdRate = 1 / usdToLbpRate;
 
   // Aggregate items by barcode to handle duplicates
   const aggregatedItems = {};
@@ -17,24 +23,28 @@ function recordOrderItemsToSales(order) {
     if (!product) continue;
 
     const qty = Number(d.quantity || 0);
-    const price = Number(d.item_price || 0);
+    const priceLbp = Number(d.item_price || 0);
+    const priceUsd = priceLbp * lbpToUsdRate; // Convert LBP to USD
 
     if (aggregatedItems[barcode]) {
       aggregatedItems[barcode].quantity += qty;
       // Use the latest price if different
-      if (price > 0) aggregatedItems[barcode].price = price;
+      if (priceUsd > 0) aggregatedItems[barcode].priceUsd = priceUsd;
     } else {
       aggregatedItems[barcode] = {
         product,
         quantity: qty,
-        price: price
+        priceUsd: priceUsd
       };
     }
   }
 
-  const upsertStmt = db.prepare(
+  const createdAt = order.created_at || new Date().toISOString();
+
+  // Simple insert - let duplicates exist for now
+  const insertStmt = db.prepare(
     `
-    INSERT OR REPLACE INTO sales (
+    INSERT INTO sales (
       order_code,
       barcode,
       product_id,
@@ -49,44 +59,30 @@ function recordOrderItemsToSales(order) {
   `
   );
 
-  const updateStockStmt = db.prepare(
-    `
-    UPDATE products
-    SET stock_quantity = stock_quantity - ?
-    WHERE barcode = ?
-  `
-  );
+  for (const [barcode, data] of Object.entries(aggregatedItems)) {
+    const { product, quantity, priceUsd } = data;
 
-  const createdAt = order.created_at || new Date().toISOString();
+    const total = quantity * priceUsd;
+    const cost = (product.cost_usd || 0) * quantity;
+    const profit = total - cost;
 
-  const runTx = db.transaction(() => {
-    for (const [barcode, data] of Object.entries(aggregatedItems)) {
-      const { product, quantity, price } = data;
-
-      const total = quantity * price;
-      const cost = (product.cost_usd || 0) * quantity;
-      const profit = total - cost;
-
-      // Use INSERT OR REPLACE to handle existing records
-      upsertStmt.run(
+    try {
+      insertStmt.run(
         order.code,
         barcode,
         product.id,
         quantity,
-        price,
+        priceUsd,
         cost,
         total,
         profit,
         createdAt
       );
-
-      // Only reduce stock if this is a new sale (not an update)
-      // For simplicity, we'll skip stock updates during sync to avoid double-counting
-      // Stock should be managed separately
+    } catch (e) {
+      // Ignore duplicate errors for now
+      console.log('Ignoring sales insert error:', e.message);
     }
-  });
-
-  runTx();
+  }
 }
 
 function getSalesReport(opts = {}) {

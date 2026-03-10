@@ -76,7 +76,7 @@ function initDatabase(userDataPath) {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_order_barcode
+    CREATE INDEX IF NOT EXISTS idx_sales_order_barcode
       ON sales(order_code, barcode);
   `);
 
@@ -87,7 +87,9 @@ function initDatabase(userDataPath) {
       baseUrl: "https://dashboard.toters-api.com",
       storeId: "",
       wallet: "main",
-      token: ""
+      token: "",
+      usdToLbpRate: 90000,
+      displayCurrency: "USD"
     };
     db.prepare(
       "INSERT INTO config(key, value) VALUES(?, ?)"

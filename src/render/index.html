@@ -157,6 +157,15 @@ td.num, th.num {
       <label>Bearer Token</label>
       <input id="inpToken" type="password" placeholder="Paste token here" />
 
+      <label>Exchange Rate (1 USD = ? LBP)</label>
+      <input id="inpUsdToLbpRate" type="number" placeholder="90000" step="1000" />
+
+      <label>Display Currency</label>
+      <select id="selDisplayCurrency">
+        <option value="USD">USD ($)</option>
+        <option value="LBP">LBP (L.L)</option>
+      </select>
+
       <div class="modal-actions">
         <button id="btnWalletSave" class="primary">Save</button>
         <button id="btnWalletCancel" class="secondary">Cancel</button>
@@ -218,6 +227,10 @@ td.num, th.num {
         <input type="checkbox" id="chkSettlements" />
         Include Settlements
       </label>
+      <select id="selCurrencyDisplay" class="inp" style="margin-left: 8px;">
+        <option value="USD">USD</option>
+        <option value="LBP">LBP</option>
+      </select>
       <button class="menu-btn danger" id="btnResetSupplier">Reset Costs</button>
     </div>
   </div>

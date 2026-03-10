@@ -363,6 +363,50 @@ ipcMain.handle("wallet:sync", () => walletDb.syncWallet());
 
 ipcMain.handle("products:import", (_evt, rows) => productsDb.importProducts(rows));
 ipcMain.handle("products:get", () => productsDb.getProducts());
+ipcMain.handle("products:update", (_evt, barcode, updates) => productsDb.updateProduct(barcode, updates));
+ipcMain.handle("products:exportExcel", async () => {
+  const rows = productsDb.exportProductsExcel();
+
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    title: "Export Products",
+    defaultPath: (() => {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, "0");
+      const day = String(now.getDate()).padStart(2, "0");
+      return `products-${year}-${month}-${day}.xlsx`;
+    })(),
+    filters: [{ name: "Excel", extensions: ["xlsx"] }],
+  });
+
+  if (canceled || !filePath) {
+    return { ok: false, canceled: true };
+  }
+
+  const workbook = XLSX.utils.book_new();
+
+  const sheetData = rows.map((r) => ({
+    Barcode: r.barcode,
+    SKU: r.sku,
+    "Item Name": r.item_name,
+    Brand: r.brand,
+    Category: r.category,
+    "Sub Category": r.sub_category,
+    "Unit Price (USD)": r.unit_price_usd,
+    "Cost (USD)": r.cost_usd,
+    "Measurement Unit": r.measurement_unit,
+    "Measurement Value": r.measurement_value,
+    Description: r.description,
+    "Stock Quantity": r.stock_quantity,
+    "Updated At": r.updated_at,
+  }));
+
+  const sheet = XLSX.utils.json_to_sheet(sheetData);
+  XLSX.utils.book_append_sheet(workbook, sheet, "Products");
+  XLSX.writeFile(workbook, filePath);
+
+  return { ok: true, path: filePath, rows: rows.length };
+});
 
 ipcMain.handle("sales:report", (_evt, opts) => {
   return salesDb.getSalesReport(opts || {});
@@ -395,9 +439,19 @@ ipcMain.handle("sales:syncFromOrders", async () => {
 
   const list = await syncOrders(cfg.storeId);
 
+  // Remove duplicates by order code
+  const uniqueOrders = [];
+  const seen = new Set();
+  for (const o of list || []) {
+    if (!seen.has(o.code)) {
+      seen.add(o.code);
+      uniqueOrders.push(o);
+    }
+  }
+
   let processed = 0;
 
-  for (const o of list || []) {
+  for (const o of uniqueOrders) {
     try {
       await loadDetailsByCode(o.code);
       processed += 1;

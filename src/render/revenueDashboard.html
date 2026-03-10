@@ -207,6 +207,10 @@ th {
           <option value="week">Weekly</option>
           <option value="month">Monthly</option>
         </select>
+        <select id="currencySelect" class="date-input">
+          <option value="USD">USD</option>
+          <option value="LBP">LBP</option>
+        </select>
         <button id="btnRefresh" class="primary">Refresh</button>
       </div>
     </div>
@@ -292,10 +296,14 @@ th {
     const dateFromEl = document.getElementById('dateFrom');
     const dateToEl = document.getElementById('dateTo');
     const periodSelectEl = document.getElementById('periodSelect');
+    const currencySelectEl = document.getElementById('currencySelect');
     const btnRefresh = document.getElementById('btnRefresh');
 
     // Chart instances
     let revenueChart, profitChart, ordersChart, marginChart, topProductsRevenueChart;
+
+    let currentCurrency = 'USD';
+    let usdToLbpRate = 90000;
 
     function showError(message) {
       errorEl.textContent = message;
@@ -317,10 +325,16 @@ th {
     }
 
     function formatCurrency(amount) {
-      return new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: 'USD'
-      }).format(amount);
+      const numAmount = Number(amount) || 0;
+      if (currentCurrency === 'LBP') {
+        const lbpAmount = numAmount * usdToLbpRate;
+        return lbpAmount.toLocaleString() + ' L.L';
+      } else {
+        return new Intl.NumberFormat('en-US', {
+          style: 'currency',
+          currency: 'USD'
+        }).format(numAmount);
+      }
     }
 
     function formatNumber(num) {
@@ -330,6 +344,26 @@ th {
     function calculateMargin(revenue, profit) {
       return revenue > 0 ? ((profit / revenue) * 100).toFixed(1) : 0;
     }
+
+    async function loadWalletConfig() {
+      try {
+        const cfg = await window.api.walletGetConfig();
+        if (cfg) {
+          currentCurrency = cfg.displayCurrency || 'USD';
+          usdToLbpRate = cfg.usdToLbpRate || 90000;
+          currencySelectEl.value = currentCurrency;
+        }
+      } catch (e) {
+        console.error('Failed to load wallet config:', e);
+      }
+    }
+
+    // Event listeners
+    btnRefresh.addEventListener('click', loadDashboardData);
+    currencySelectEl.addEventListener('change', () => {
+      currentCurrency = currencySelectEl.value;
+      loadDashboardData(); // Reload data with new currency
+    });
 
     async function loadDashboardData() {
       try {
@@ -681,11 +715,10 @@ th {
     dateFromEl.value = thirtyDaysAgo.toISOString().split('T')[0];
     dateToEl.value = today.toISOString().split('T')[0];
 
-    // Event listeners
-    btnRefresh.addEventListener('click', loadDashboardData);
-
     // Initial load
-    loadDashboardData();
+    loadWalletConfig().then(() => {
+      loadDashboardData();
+    });
   </script>
 </body>
 </html>

@@ -6,6 +6,7 @@ const statusEl = $("status");
 const tbody = $("tbody");
 
 const chkSettlements = $("chkSettlements");
+const selCurrencyDisplay = $("selCurrencyDisplay");
 
 const salesFrom = $("salesFrom");
 const salesTo = $("salesTo");
@@ -17,11 +18,24 @@ const inpBaseUrl = $("inpBaseUrl");
 const inpStoreId = $("inpStoreId");
 const inpWallet = $("inpWallet");
 const inpToken = $("inpToken");
+const inpUsdToLbpRate = $("inpUsdToLbpRate");
+const selDisplayCurrency = $("selDisplayCurrency");
 const walletMsg = $("walletModalMsg");
 
-function fmt(n) {
+let currentCurrency = "USD";
+let usdToLbpRate = 90000;
+
+function fmt(n, currency = currentCurrency) {
   const x = Number(n) || 0;
-  return x.toLocaleString();
+
+  if (currency === "USD") {
+    // Convert from LBP to USD
+    const usdAmount = x / usdToLbpRate;
+    return usdAmount.toLocaleString();
+  } else {
+    // Show in LBP
+    return x.toLocaleString() + " L.L";
+  }
 }
 
 function setError(e) {
@@ -32,7 +46,7 @@ function setStats(t) {
   const includeSettlements = chkSettlements.checked;
 
   const blocks = [
-    [`Orders`, fmt(t.orders)],
+    [`Orders`, t.orders],
     [`Gross`, fmt(t.gross)],
     [`Service`, fmt(t.service_fee)],
     [`VAT`, fmt(t.vat)],
@@ -78,7 +92,7 @@ function renderRows(rows) {
         <input type="checkbox" data-order="${r.order_code}" data-kind="paid" ${r.supplier_paid ? "checked" : ""} />
       </td>
       <td class="num">${fmt(r.net_profit)}</td>
-      <td class="num">${fmt(r.row_count)}</td>
+      <td class="num">${r.row_count}</td>
       <td>${r.dates || ""}</td>
     `;
 
@@ -138,19 +152,39 @@ async function refresh() {
   setStats(totals);
 }
 
-function openWalletModal(cfg) {
-  walletMsg.textContent = "";
-  inpBaseUrl.value = cfg?.baseUrl || "https://dashboard.toters-api.com";
-  inpStoreId.value = cfg?.storeId || "";
-  inpWallet.value = cfg?.wallet || "main";
-  inpToken.value = cfg?.token || "";
-  walletBackdrop.classList.remove("hidden");
-  walletModal.classList.remove("hidden");
+async function loadWalletConfig() {
+  try {
+    const cfg = await window.api.walletGetConfig();
+    if (cfg) {
+      currentCurrency = cfg.displayCurrency || "USD";
+      usdToLbpRate = cfg.usdToLbpRate || 90000;
+      selCurrencyDisplay.value = currentCurrency;
+    }
+  } catch (e) {
+    console.error("Failed to load wallet config:", e);
+  }
 }
 
 function closeWalletModal() {
   walletBackdrop.classList.add("hidden");
   walletModal.classList.add("hidden");
+}
+
+function openWalletModal(cfg) {
+  // Populate form fields with config data
+  inpBaseUrl.value = cfg?.baseUrl || "";
+  inpStoreId.value = cfg?.storeId || "";
+  inpWallet.value = cfg?.wallet || "main";
+  inpToken.value = cfg?.token || "";
+  inpUsdToLbpRate.value = cfg?.usdToLbpRate || 90000;
+  selDisplayCurrency.value = cfg?.displayCurrency || "USD";
+
+  // Clear any previous messages
+  walletMsg.textContent = "";
+
+  // Show modal
+  walletBackdrop.classList.remove("hidden");
+  walletModal.classList.remove("hidden");
 }
 
 async function loadWalletConfigAndOpen() {
@@ -226,7 +260,9 @@ $("btnWalletSave").addEventListener("click", async () => {
       baseUrl: inpBaseUrl.value.trim(),
       storeId: inpStoreId.value.trim(),
       wallet: inpWallet.value.trim() || "main",
-      token: inpToken.value.trim()
+      token: inpToken.value.trim(),
+      usdToLbpRate: Number(inpUsdToLbpRate.value) || 90000,
+      displayCurrency: selDisplayCurrency.value || "USD"
     };
     await window.api.walletSaveConfig(cfg);
     walletMsg.textContent = "Saved.";
@@ -237,6 +273,11 @@ $("btnWalletSave").addEventListener("click", async () => {
 });
 
 chkSettlements.addEventListener("change", () => {
+  refresh().catch(setError);
+});
+
+selCurrencyDisplay.addEventListener("change", () => {
+  currentCurrency = selCurrencyDisplay.value;
   refresh().catch(setError);
 });
 
@@ -291,4 +332,6 @@ $("btnSyncSales").addEventListener("click", async () => {
 });
 
 // Initial load
-refresh().catch(setError);
+loadWalletConfig().then(() => {
+  refresh().catch(setError);
+});

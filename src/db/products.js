@@ -89,9 +89,77 @@ function findProductByBarcode(barcode) {
     .get(barcode);
 }
 
+function updateProduct(barcode, updates) {
+  const db = getDb();
+  
+  const fields = [];
+  const values = [];
+  
+  if (updates.unit_price_usd !== undefined) {
+    fields.push('unit_price_usd = ?');
+    values.push(updates.unit_price_usd);
+  }
+  
+  if (updates.cost_usd !== undefined) {
+    fields.push('cost_usd = ?');
+    values.push(updates.cost_usd);
+  }
+  
+  if (updates.stock_quantity !== undefined) {
+    fields.push('stock_quantity = ?');
+    values.push(updates.stock_quantity);
+  }
+  
+  if (fields.length === 0) return { ok: false, error: 'No fields to update' };
+  
+  fields.push('updated_at = datetime(\'now\')');
+  
+  const sql = `
+    UPDATE products 
+    SET ${fields.join(', ')}
+    WHERE barcode = ?
+  `;
+  
+  values.push(barcode);
+  
+  const result = db.prepare(sql).run(...values);
+  
+  return { ok: true, changes: result.changes };
+}
+
+function exportProductsExcel() {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `
+    SELECT 
+      barcode,
+      item_name,
+      sku,
+      brand,
+      category,
+      sub_category,
+      unit_price_usd,
+      cost_usd,
+      measurement_unit,
+      measurement_value,
+      description,
+      stock_quantity,
+      updated_at
+    FROM products
+    ORDER BY item_name
+  `
+    )
+    .all();
+
+  return rows;
+}
+
 module.exports = {
   importProducts,
   getProducts,
   findProductByBarcode,
+  updateProduct,
+  exportProductsExcel,
 };
 

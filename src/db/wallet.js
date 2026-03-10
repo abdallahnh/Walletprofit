@@ -106,6 +106,8 @@ function saveWalletConfig(cfg) {
     storeId: String(cfg.storeId || "").trim(),
     wallet: String(cfg.wallet || "main").trim() || "main",
     token: String(cfg.token || "").trim(),
+    usdToLbpRate: Number(cfg.usdToLbpRate || 90000),
+    displayCurrency: String(cfg.displayCurrency || "USD").toUpperCase(),
   };
 
   db.prepare(

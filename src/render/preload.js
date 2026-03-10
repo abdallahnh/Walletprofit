@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld("api", {
   productsGet: () => ipcRenderer.invoke("products:get"),
   productsImport: (rows) => ipcRenderer.invoke("products:import", rows),
   productsImportExcel: () => ipcRenderer.invoke("products:importExcel"),
+  productsUpdate: (barcode, updates) => ipcRenderer.invoke("products:update", barcode, updates),
+  productsExportExcel: () => ipcRenderer.invoke("products:exportExcel"),
 
   // Sales reports
   salesReport: (opts) => ipcRenderer.invoke("sales:report", opts || {}),

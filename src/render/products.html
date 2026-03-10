@@ -2,136 +2,344 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Products</title>
+<title>Products Management</title>
 
 <style>
-
-body{
-  font-family: system-ui;
-  padding:20px;
+body {
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  margin: 16px;
+  background: #fff;
 }
 
-h2{
-  margin-bottom:12px;
+h1 {
+  font-size: 18px;
+  margin: 0 0 8px;
 }
 
-.toolbar{
-  margin-bottom:16px;
+.muted {
+  color:#666;
+  font-size:12px;
+  margin-bottom:10px;
 }
 
-button{
-  padding:8px 14px;
-  border-radius:8px;
-  border:none;
-  cursor:pointer;
-  font-size:13px;
+.row {
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  margin:10px 0 12px;
+  align-items:center;
 }
 
-.primary{
+button {
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.primary {
   background:#111;
-  color:white;
+  color:#fff;
 }
 
-.secondary{
+.secondary {
   background:#eee;
 }
 
-table{
-  width:100%;
-  border-collapse:collapse;
+.wrap {
+  overflow:auto;
+  max-height: calc(100vh - 200px);
+  border:1px solid #eee;
+  border-radius: 12px;
 }
 
-th,td{
-  padding:10px;
-  border-bottom:1px solid #eee;
+table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
 }
 
-th{
-  text-align:left;
-  background:#fafafa;
+th, td {
+  border-bottom: 1px solid #e6e6e6;
+  padding: 8px 4px;
+  font-size: 12px;
+  text-align: left;
+  vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
+th {
+  position: sticky;
+  top: 0;
+  background: #fafafa;
+  z-index: 2;
+  font-weight: 600;
+}
+
+td.num, th.num {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+td.input-cell {
+  padding: 4px 2px;
+}
+
+.inp {
+  width: 100%;
+  max-width: 85px;
+  padding:4px 6px;
+  border:1px solid #ddd;
+  border-radius:6px;
+  font-family: ui-monospace, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  text-align: center;
+  box-sizing: border-box;
+  margin: 0 auto;
+  display: block;
+}
+
+.save-btn {
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: #28a745;
+  color: white;
+  border: none;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.save-btn:hover {
+  background: #218838;
+}
+
+.edit-mode {
+  background: #fff3cd;
+}
+
+.success-msg {
+  color: #28a745;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.error-msg {
+  color: #dc3545;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.loading {
+  opacity: 0.6;
+  pointer-events: none;
+}
 </style>
 
 </head>
 
 <body>
 
-<h2>Products</h2>
+<h1>Products Management</h1>
+<div class="muted">Manage product prices, costs, and stock levels</div>
 
-<div class="toolbar">
+<div class="row">
+  <button id="btnImportProducts" class="primary">
+    Import Products Excel
+  </button>
 
-<button id="btnImportProducts" class="primary">
-Import Products Excel
-</button>
+  <button id="btnExportProducts" class="secondary">
+    Export Products Excel
+  </button>
 
-<button id="btnReload" class="secondary">
-Reload
-</button>
-
+  <button id="btnReload" class="secondary">
+    Reload
+  </button>
 </div>
 
-<table>
+<div id="messages"></div>
 
+<div class="wrap">
+<table>
 <thead>
 <tr>
-<th>Barcode</th>
-<th>Name</th>
-<th>Category</th>
-<th>Price</th>
-<th>Cost</th>
-<th>Stock</th>
+  <th style="width:120px">Barcode</th>
+  <th>Product Name</th>
+  <th style="width:100px">Category</th>
+  <th class="num" style="width:110px">Price (USD)</th>
+  <th class="num" style="width:110px">Cost (USD)</th>
+  <th class="num" style="width:90px">Stock</th>
+  <th style="width:80px">Actions</th>
 </tr>
 </thead>
-
 <tbody id="tbody"></tbody>
-
 </table>
+</div>
 
 <script>
 
+let products = [];
+
 async function loadProducts(){
+  try {
+    products = await window.api.productsGet();
+    renderProducts();
+  } catch (e) {
+    showMessage('Error loading products: ' + e.message, 'error');
+  }
+}
 
-  const rows = await window.api.productsGet()
+function renderProducts(){
+  const tbody = document.getElementById("tbody");
+  tbody.innerHTML = "";
 
-  const tbody = document.getElementById("tbody")
+  products.forEach(p => {
+    const tr = document.createElement("tr");
+    tr.dataset.barcode = p.barcode;
 
-  tbody.innerHTML = ""
-
-  rows.forEach(p=>{
-
-    const tr = document.createElement("tr")
+    const isEditing = tr.classList.contains('edit-mode');
 
     tr.innerHTML = `
       <td>${p.barcode}</td>
       <td>${p.item_name}</td>
       <td>${p.category || ""}</td>
-      <td>${p.unit_price_usd || ""}</td>
-      <td>${p.cost_usd || ""}</td>
-      <td>${p.stock_quantity || 0}</td>
-    `
+      <td class="num input-cell">
+        <input type="number" step="0.01" class="inp price-input"
+               value="${(p.unit_price_usd != null ? p.unit_price_usd : 0).toFixed(2)}"
+               data-original="${p.unit_price_usd != null ? p.unit_price_usd : 0}">
+      </td>
+      <td class="num input-cell">
+        <input type="number" step="0.01" class="inp cost-input"
+               value="${(p.cost_usd != null ? p.cost_usd : 0).toFixed(2)}"
+               data-original="${p.cost_usd != null ? p.cost_usd : 0}">
+      </td>
+      <td class="num input-cell">
+        <input type="number" class="inp stock-input"
+               value="${p.stock_quantity != null ? p.stock_quantity : 0}"
+               data-original="${p.stock_quantity != null ? p.stock_quantity : 0}">
+      </td>
+      <td>
+        <button class="save-btn" onclick="saveProduct('${p.barcode}')">Save</button>
+      </td>
+    `;
 
-    tbody.appendChild(tr)
-
-  })
-
+    tbody.appendChild(tr);
+  });
 }
 
-document.getElementById("btnReload").addEventListener("click",loadProducts)
+async function saveProduct(barcode) {
+  const tr = document.querySelector(`tr[data-barcode="${barcode}"]`);
+  if (!tr) return;
 
-document.getElementById("btnImportProducts").addEventListener("click",async()=>{
+  const priceInput = tr.querySelector('.price-input');
+  const costInput = tr.querySelector('.cost-input');
+  const stockInput = tr.querySelector('.stock-input');
+  const saveBtn = tr.querySelector('.save-btn');
 
-  const result = await window.api.productsImportExcel()
+  const updates = {};
 
-  if(!result) return
+  const newPrice = parseFloat(priceInput.value);
+  const origPrice = parseFloat(priceInput.dataset.original);
+  if (newPrice !== origPrice) {
+    updates.unit_price_usd = newPrice;
+  }
 
-  alert(`Imported ${result.count} products`)
+  const newCost = parseFloat(costInput.value);
+  const origCost = parseFloat(costInput.dataset.original);
+  if (newCost !== origCost) {
+    updates.cost_usd = newCost;
+  }
 
-  loadProducts()
+  const newStock = parseInt(stockInput.value);
+  const origStock = parseInt(stockInput.dataset.original);
+  if (newStock !== origStock) {
+    updates.stock_quantity = newStock;
+  }
 
-})
+  if (Object.keys(updates).length === 0) {
+    showMessage('No changes to save', 'error');
+    return;
+  }
 
-loadProducts()
+  // Disable UI during save
+  tr.classList.add('loading');
+  saveBtn.disabled = true;
+  saveBtn.textContent = 'Saving...';
+
+  try {
+    const result = await window.api.productsUpdate(barcode, updates);
+
+    if (result.ok) {
+      // Update the original values
+      priceInput.dataset.original = newPrice;
+      costInput.dataset.original = newCost;
+      stockInput.dataset.original = newStock;
+
+      showMessage(`Product ${barcode} updated successfully`, 'success');
+    } else {
+      showMessage('Failed to update product: ' + (result.error || 'Unknown error'), 'error');
+    }
+  } catch (e) {
+    showMessage('Error updating product: ' + e.message, 'error');
+  } finally {
+    tr.classList.remove('loading');
+    saveBtn.disabled = false;
+    saveBtn.textContent = 'Save';
+  }
+}
+
+function showMessage(text, type) {
+  const messages = document.getElementById('messages');
+  messages.innerHTML = `<div class="${type}-msg">${text}</div>`;
+
+  // Auto-clear success messages after 3 seconds
+  if (type === 'success') {
+    setTimeout(() => {
+      messages.innerHTML = '';
+    }, 3000);
+  }
+}
+
+document.getElementById("btnReload").addEventListener("click", loadProducts);
+
+document.getElementById("btnImportProducts").addEventListener("click", async() => {
+  try {
+    const result = await window.api.productsImportExcel();
+
+    if (!result) return;
+
+    if (result.ok) {
+      showMessage(`Imported ${result.count} products successfully`, 'success');
+      loadProducts();
+    } else {
+      showMessage('Import failed: ' + (result.error || 'Unknown error'), 'error');
+    }
+  } catch (e) {
+    showMessage('Import error: ' + e.message, 'error');
+  }
+});
+
+document.getElementById("btnExportProducts").addEventListener("click", async() => {
+  try {
+    const result = await window.api.productsExportExcel();
+
+    if (!result) return;
+
+    if (result.ok) {
+      showMessage(`Exported ${result.rows} products to: ${result.path}`, 'success');
+    } else if (result.canceled) {
+      showMessage('Export canceled', 'error');
+    } else {
+      showMessage('Export failed: ' + (result.error || 'Unknown error'), 'error');
+    }
+  } catch (e) {
+    showMessage('Export error: ' + e.message, 'error');
+  }
+});
+
+loadProducts();
 
 </script>
 
