@@ -1,6 +1,5 @@
 const $ = (id) => document.getElementById(id);
 
-const txt = $("txt");
 const err = $("err");
 const stats = $("stats");
 const statusEl = $("status");
@@ -160,17 +159,6 @@ async function loadWalletConfigAndOpen() {
 }
 
 // Buttons
-$("btnImport").addEventListener("click", async () => {
-  try {
-    setError("");
-    const res = await window.api.importMerge(txt.value);
-    await refresh();
-    alert(`Imported. Inserted: ${res.inserted} | Duplicates ignored: ${res.ignored}`);
-  } catch (e) {
-    setError(e);
-  }
-});
-
 $("btnRefresh").addEventListener("click", async () => {
   try { await refresh(); } catch (e) { setError(e); }
 });
@@ -179,27 +167,6 @@ $("btnExportCsv").addEventListener("click", async () => {
   try {
     const p = await window.api.exportCsv();
     alert(`CSV exported to: ${p}`);
-  } catch (e) {
-    setError(e);
-  }
-});
-
-$("btnExportBackup").addEventListener("click", async () => {
-  try {
-    const p = await window.api.exportBackup();
-    alert(`Backup exported to: ${p}`);
-  } catch (e) {
-    setError(e);
-  }
-});
-
-$("btnImportBackup").addEventListener("click", async () => {
-  try {
-    const res = await window.api.importBackup();
-    if (!res?.canceled) {
-      alert(`Imported backup. Transactions: ${res.imported_transactions} | Meta: ${res.imported_meta}`);
-      await refresh();
-    }
   } catch (e) {
     setError(e);
   }

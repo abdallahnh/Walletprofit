@@ -25,6 +25,9 @@ contextBridge.exposeInMainWorld("api", {
 
   openProducts: () => ipcRenderer.invoke("open-products"),
 
+  // Import page
+  openImport: () => ipcRenderer.invoke("open-import"),
+
   // Products
   productsGet: () => ipcRenderer.invoke("products:get"),
   productsImport: (rows) => ipcRenderer.invoke("products:import", rows),

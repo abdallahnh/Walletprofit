@@ -19,7 +19,7 @@
     .stat b { font-variant-numeric: tabular-nums; }
     .error { color:#b00020; white-space:pre-wrap; font-size:12px; margin:8px 0; }
     
-    .wrap { overflow:auto; max-height: 520px; border:1px solid #eee; border-radius: 12px; }
+    .wrap { overflow:auto; max-height: calc(100vh - 300px); border:1px solid #eee; border-radius: 12px; }
 
 table {
   width: 100%;
@@ -52,6 +52,71 @@ td.num, th.num {
 
 .view-btn { padding: 8px 12px; border-radius: 12px; background:#eee; cursor:pointer; }
     .inp { width: 120px; padding:6px; border:1px solid #ddd; border-radius:8px; font-family: ui-monospace, Menlo, Monaco, Consolas, monospace; font-size: 12px; }
+
+    /* Menu Styles */
+    .menu-bar {
+      display: flex;
+      gap: 8px;
+      margin: 16px 0;
+      padding: 12px;
+      background: #f8f9fa;
+      border-radius: 12px;
+      border: 1px solid #dee2e6;
+      flex-wrap: wrap;
+    }
+
+    .menu-group {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .menu-group label {
+      font-size: 12px;
+      font-weight: 600;
+      color: #495057;
+      margin-right: 4px;
+    }
+
+    .menu-btn {
+      padding: 8px 12px;
+      border: 1px solid #dee2e6;
+      border-radius: 8px;
+      background: white;
+      cursor: pointer;
+      font-size: 12px;
+      transition: all 0.2s;
+    }
+
+    .menu-btn:hover {
+      background: #e9ecef;
+      border-color: #adb5bd;
+    }
+
+    .menu-btn.active {
+      background: #007bff;
+      color: white;
+      border-color: #007bff;
+    }
+
+    .menu-btn.primary {
+      background: #007bff;
+      color: white;
+      border-color: #007bff;
+    }
+
+    .menu-btn.danger {
+      background: #dc3545;
+      color: white;
+      border-color: #dc3545;
+    }
+
+    .menu-separator {
+      width: 1px;
+      height: 24px;
+      background: #dee2e6;
+      margin: 0 8px;
+    }
 
     /* Modal */
     .hidden { display:none !important; }
@@ -103,44 +168,60 @@ td.num, th.num {
 
   <h1>Wallet Profit (Ops)</h1>
   <div class="muted">
-    Paste wallet rows (TSV): <b>id Amount Reason Type Date</b>. Duplicate IDs are ignored automatically by the database.
+    Transaction data is synced automatically from the wallet API. Use the menu below to manage operations.
   </div>
 
   <div id="status" class="muted"></div>
 
-  <div class="row">
-    <button class="primary" id="btnImport">Import TSV</button>
-    <button class="secondary" id="btnRefresh">Refresh</button>
-    <button class="secondary" id="btnExportCsv">Export CSV</button>
-    <button class="secondary" id="btnExportBackup">Export Backup</button>
-    <button class="secondary" id="btnImportBackup">Import Backup</button>
+  <!-- Menu Bar -->
+  <div class="menu-bar">
+    <div class="menu-group">
+      <label>Data:</label>
+      <button class="menu-btn" id="btnRefresh">Refresh</button>
+      <button class="menu-btn" id="btnExportCsv">Export CSV</button>
+    </div>
 
-    <label class="pill">
-      <input type="checkbox" id="chkSettlements" />
-      Include Balance Settlements in stats
-    </label>
+    <div class="menu-separator"></div>
 
-    <button class="secondary" id="btnResetSupplier">Reset Supplier Costs</button>
-    <button class="secondary" id="btnWalletSettings">Wallet Settings</button>
-    <button class="primary" id="btnWalletSync">Sync Wallet</button>
-    <button id="btnProducts">Products</button>
-    <button id="btnRevenueDashboard">Revenue Dashboard</button>
-    <button id="btnDbAdmin" class="secondary">DB Tables</button>
+    <div class="menu-group">
+      <label>Wallet:</label>
+      <button class="menu-btn" id="btnWalletSettings">Settings</button>
+      <button class="menu-btn primary" id="btnWalletSync">Sync</button>
+    </div>
+
+    <div class="menu-separator"></div>
+
+    <div class="menu-group">
+      <label>Sales:</label>
+      <input class="inp" type="date" id="salesFrom" style="margin-right: 4px;" />
+      <span style="font-size: 12px; margin-right: 4px;">to</span>
+      <input class="inp" type="date" id="salesTo" style="margin-right: 8px;" />
+      <button class="menu-btn" id="btnGenerateSales">Report</button>
+      <button class="menu-btn" id="btnExportSalesExcel">Export Excel</button>
+      <button class="menu-btn" id="btnSyncSales">Sync Orders</button>
+    </div>
+
+    <div class="menu-separator"></div>
+
+    <div class="menu-group">
+      <label>Views:</label>
+      <button class="menu-btn" id="btnProducts">Products</button>
+      <button class="menu-btn" id="btnRevenueDashboard">Dashboard</button>
+      <button class="menu-btn" id="btnDbAdmin">DB Admin</button>
+    </div>
+
+    <div class="menu-separator"></div>
+
+    <div class="menu-group">
+      <label>Options:</label>
+      <label class="pill">
+        <input type="checkbox" id="chkSettlements" />
+        Include Settlements
+      </label>
+      <button class="menu-btn danger" id="btnResetSupplier">Reset Costs</button>
+    </div>
   </div>
 
-  <div class="row">
-    <label>From
-      <input class="inp" type="date" id="salesFrom" />
-    </label>
-    <label>To
-      <input class="inp" type="date" id="salesTo" />
-    </label>
-    <button class="secondary" id="btnGenerateSales">Generate Sales Report</button>
-    <button class="secondary" id="btnExportSalesExcel">Export Excel</button>
-    <button class="secondary" id="btnSyncSales">Sync Sales from Orders</button>
-  </div>
-
-  <textarea id="txt" placeholder="Paste wallet export here..."></textarea>
   <div class="error" id="err"></div>
 
   <div class="stats" id="stats"></div>

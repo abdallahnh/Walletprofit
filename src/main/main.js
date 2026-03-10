@@ -231,6 +231,33 @@ ipcMain.handle("open-products", () => {
 
 });
 
+ipcMain.handle("open-import", () => {
+
+  const { preloadJs } = resolveRendererPaths();
+
+  const importPath = path.join(
+    app.getAppPath(),
+    "src",
+    "render",
+    "import.html"
+  );
+
+  const win = new BrowserWindow({
+    width: 1000,
+    height: 800,
+    webPreferences: {
+      preload: preloadJs,
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+
+  console.log("Opening import page:", importPath);
+
+  win.loadFile(importPath);
+
+});
+
 ipcMain.handle("open-revenue-dashboard", () => {
 
   const { preloadJs } = resolveRendererPaths();
