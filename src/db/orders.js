@@ -86,7 +86,7 @@ function computeOrders() {
     });
   }
 
-  orders.sort((a, b) => a.order_code.localeCompare(b.order_code));
+  orders.sort((a, b) => a.order_code.localeCompare(b.created_at));
 
   return { orders, settlementsTotal };
 }
