@@ -34,4 +34,9 @@ contextBridge.exposeInMainWorld("api", {
   salesReport: (opts) => ipcRenderer.invoke("sales:report", opts || {}),
   salesExportExcel: (opts) => ipcRenderer.invoke("sales:exportExcel", opts || {}),
   salesSyncFromOrders: () => ipcRenderer.invoke("sales:syncFromOrders"),
+
+  // DB admin
+  openDbAdmin: () => ipcRenderer.invoke("open-db-admin"),
+  dbGetTable: (table, limit) => ipcRenderer.invoke("db:getTable", { table, limit }),
+  dbClearTable: (table) => ipcRenderer.invoke("db:clearTable", table),
 });

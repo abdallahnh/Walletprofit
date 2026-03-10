@@ -1,0 +1,102 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>DB Tables</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 16px; }
+    h2 { margin: 0 0 8px; font-size: 16px; }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:12px; }
+    select, button { padding: 6px 10px; border-radius: 8px; border:1px solid #ddd; font-size:12px; }
+    button.danger { background:#b00020; color:#fff; border-color:#b00020; }
+    button.secondary { background:#eee; }
+    .muted { font-size:12px; color:#666; margin-top:4px; }
+    table { width:100%; border-collapse:collapse; font-size:12px; table-layout:fixed; }
+    th, td { padding:6px 8px; border-bottom:1px solid #eee; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    th { background:#fafafa; position:sticky; top:0; z-index:1; }
+    .wrap { max-height:600px; overflow:auto; border:1px solid #eee; border-radius:10px; }
+  </style>
+</head>
+<body>
+  <h2>Database Tables</h2>
+  <div class="row">
+    <label>
+      Table
+      <select id="selTable">
+        <option value="transactions">transactions</option>
+        <option value="order_meta">order_meta</option>
+        <option value="products">products</option>
+        <option value="sales">sales</option>
+        <option value="config">config</option>
+      </select>
+    </label>
+    <button id="btnReload" class="secondary">Reload</button>
+    <button id="btnClear" class="danger">Delete all rows in table</button>
+  </div>
+
+  <div id="info" class="muted"></div>
+
+  <div class="wrap">
+    <table>
+      <thead id="thead"></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    const selTable = $("selTable");
+    const info = $("info");
+    const thead = $("thead");
+    const tbody = $("tbody");
+
+    async function loadTable() {
+      const table = selTable.value;
+      info.textContent = "Loading " + table + "…";
+      thead.innerHTML = "";
+      tbody.innerHTML = "";
+
+      try {
+        const rows = await window.api.dbGetTable(table, 200);
+
+        if (!rows || !rows.length) {
+          info.textContent = table + ": 0 rows (showing max 200)";
+          return;
+        }
+
+        const cols = Object.keys(rows[0]);
+
+        thead.innerHTML = "<tr>" + cols.map(c => "<th>" + c + "</th>").join("") + "</tr>";
+
+        tbody.innerHTML = rows.map(r => {
+          return "<tr>" + cols.map(c => "<td>" + String(r[c] ?? "") + "</td>").join("") + "</tr>";
+        }).join("");
+
+        info.textContent = table + ": " + rows.length + " rows (showing max 200)";
+      } catch (e) {
+        info.textContent = "Error: " + String(e);
+      }
+    }
+
+    $("btnReload").addEventListener("click", loadTable);
+
+    $("btnClear").addEventListener("click", async () => {
+      const table = selTable.value;
+      if (!confirm("Delete ALL rows from '" + table + "'?\nThis cannot be undone.")) return;
+      try {
+        info.textContent = "Clearing " + table + "…";
+        await window.api.dbClearTable(table);
+        await loadTable();
+      } catch (e) {
+        info.textContent = "Error: " + String(e);
+      }
+    });
+
+    selTable.addEventListener("change", loadTable);
+
+    loadTable();
+  </script>
+</body>
+</html>
+

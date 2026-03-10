@@ -3,6 +3,7 @@ const $ = (id) => document.getElementById(id);
 const txt = $("txt");
 const err = $("err");
 const stats = $("stats");
+const statusEl = $("status");
 const tbody = $("tbody");
 
 const chkSettlements = $("chkSettlements");
@@ -86,8 +87,8 @@ function renderRows(rows) {
   }
 
   document.getElementById("btnProducts").addEventListener("click", () => {
-  window.api.openProducts();
-});
+    window.api.openProducts();
+  });
 
   document.querySelectorAll(".view-btn").forEach(btn => {
   btn.addEventListener("click", () => {
@@ -217,7 +218,14 @@ $("btnWalletSettings").addEventListener("click", async () => {
 $("btnWalletSync").addEventListener("click", async () => {
   try {
     setError("");
+    statusEl.textContent = "Syncing wallet…";
+    $("btnWalletSync").disabled = true;
+
     const res = await window.api.walletSync();
+
+    $("btnWalletSync").disabled = false;
+    statusEl.textContent = "";
+
     if (!res.ok) {
       setError(res.error || "Sync failed");
       return;
@@ -225,8 +233,14 @@ $("btnWalletSync").addEventListener("click", async () => {
     await refresh();
     alert(`Synced. Fetched: ${res.totalFetched} | Inserted: ${res.totalInserted} | Duplicates ignored: ${res.totalIgnored} | Pages: ${res.pages}`);
   } catch (e) {
+    $("btnWalletSync").disabled = false;
+    statusEl.textContent = "";
     setError(e);
   }
+});
+
+$("btnDbAdmin").addEventListener("click", () => {
+  window.api.openDbAdmin();
 });
 
 // Modal buttons
@@ -285,13 +299,22 @@ $("btnExportSalesExcel").addEventListener("click", async () => {
 $("btnSyncSales").addEventListener("click", async () => {
   try {
     setError("");
+    statusEl.textContent = "Syncing sales from orders…";
+    $("btnSyncSales").disabled = true;
+
     const res = await window.api.salesSyncFromOrders();
+
+    $("btnSyncSales").disabled = false;
+    statusEl.textContent = "";
+
     if (!res?.ok) {
       setError(res?.error || "Sync sales failed");
       return;
     }
     alert(`Synced sales from orders. Processed orders: ${res.processed}`);
   } catch (e) {
+    $("btnSyncSales").disabled = false;
+    statusEl.textContent = "";
     setError(e);
   }
 });

@@ -8,6 +8,7 @@ const walletDb = require("../db/wallet");
 const ordersDb = require("../db/orders");
 const productsDb = require("../db/products");
 const salesDb = require("../db/sales");
+const adminDb = require("../db/admin");
 
 const logger = require("../utils/logger");
 
@@ -230,6 +231,31 @@ ipcMain.handle("open-products", () => {
 
 });
 
+ipcMain.handle("open-db-admin", () => {
+  const { preloadJs } = resolveRendererPaths();
+
+  const adminPath = path.join(
+    app.getAppPath(),
+    "src",
+    "render",
+    "dbAdmin.html"
+  );
+
+  const win = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    webPreferences: {
+      preload: preloadJs,
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  console.log("Opening DB admin page:", adminPath);
+
+  win.loadFile(adminPath);
+});
+
 ipcMain.handle("products:importExcel", async () => {
 
   const { canceled, filePaths } = await dialog.showOpenDialog({
@@ -348,4 +374,12 @@ ipcMain.handle("sales:exportExcel", async (_evt, opts) => {
   XLSX.writeFile(workbook, filePath);
 
   return { ok: true, path: filePath, rows: rows.length };
+});
+
+ipcMain.handle("db:getTable", (_evt, { table, limit }) => {
+  return adminDb.getTableRows(table, limit || 200);
+});
+
+ipcMain.handle("db:clearTable", (_evt, table) => {
+  return adminDb.clearTable(table);
 });
