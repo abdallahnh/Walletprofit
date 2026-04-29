@@ -50,14 +50,21 @@ function initDatabase(userDataPath) {
       item_name TEXT,
       sku TEXT,
       brand TEXT,
+      store_name TEXT,
+      item_id INTEGER,
+      source_id INTEGER,
       category TEXT,
+      category_id INTEGER,
       sub_category TEXT,
+      sub_category_id INTEGER,
       unit_price_usd REAL,
       cost_usd REAL,
       measurement_unit TEXT,
       measurement_value TEXT,
       description TEXT,
       image_url TEXT,
+      alt_barcodes TEXT,
+      import_price_usd REAL,
       stock_quantity INTEGER DEFAULT 0,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -80,6 +87,9 @@ function initDatabase(userDataPath) {
       ON sales(order_code, barcode);
   `);
 
+  // Lightweight schema migrations for existing databases.
+  ensureProductsColumns(db);
+
   // Ensure a default wallet config row exists
   const existing = db.prepare("SELECT value FROM config WHERE key=?").get("walletConfig");
   if (!existing) {
@@ -97,6 +107,27 @@ function initDatabase(userDataPath) {
   }
 
   return db;
+}
+
+function ensureProductsColumns(dbConn) {
+  const cols = dbConn.prepare("PRAGMA table_info(products)").all();
+  const existing = new Set(cols.map((c) => c.name));
+
+  const additions = [
+    ["store_name", "TEXT"],
+    ["item_id", "INTEGER"],
+    ["source_id", "INTEGER"],
+    ["category_id", "INTEGER"],
+    ["sub_category_id", "INTEGER"],
+    ["alt_barcodes", "TEXT"],
+    ["import_price_usd", "REAL"],
+  ];
+
+  for (const [name, type] of additions) {
+    if (!existing.has(name)) {
+      dbConn.exec(`ALTER TABLE products ADD COLUMN ${name} ${type}`);
+    }
+  }
 }
 
 function getDb() {

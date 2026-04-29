@@ -38,6 +38,18 @@ function buildAppMenu(win) {
         ]
       : []),
     {
+      label: "Edit",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { role: "selectAll" },
+      ],
+    },
+    {
       label: "View",
       submenu: [
         { role: "reload" },
@@ -322,36 +334,72 @@ ipcMain.handle("products:importExcel", async () => {
   const workbook = XLSX.readFile(filePaths[0]);
 
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const raw = XLSX.utils.sheet_to_json(sheet);
+  const raw = XLSX.utils.sheet_to_json(sheet, { defval: "" });
 
-  // normalize keys (remove spaces, lowercase, underscores)
-  const data = raw.map((row) => {
-    const normalized = {};
-    for (const key in row) {
-      const cleanKey = key
-        .toLowerCase()
-        .replace(/\s+/g, "")
-        .replace(/_/g, "");
-      normalized[cleanKey] = row[key];
+  const normalizeHeader = (k) =>
+    String(k || "")
+      .replace(/^"+|"+$/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "");
+
+  const normalizeBarcode = (v) => String(v ?? "").trim();
+  const toNumberOrZero = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const getVal = (obj, aliases) => {
+    for (const key of aliases) {
+      if (obj[key] !== undefined && obj[key] !== null && String(obj[key]).trim() !== "") {
+        return obj[key];
+      }
     }
-    return normalized;
-  });
+    return "";
+  };
 
-  const rows = data.map((r) => ({
-    barcode: r.barcode,
-    sku: r.sku || "",
-    item_name: r.itemname,
-    brand: r.brand || "",
-    category: r.category,
-    sub_category: r.subcategory,
-    unit_price_usd: r.unitpriceusd || 0,
-    cost_usd: r.unitpriceusd || 0,
-    measurement_unit: r.measurementunit,
-    measurement_value: r.measurementvalue,
-    description: r.description,
-    image_url: r.urlimages,
-    stock_quantity: r.quantity || 0,
-  }));
+  const rows = raw
+    .map((src) => {
+      const row = {};
+      for (const [k, v] of Object.entries(src)) {
+        row[normalizeHeader(k)] = v;
+      }
+
+      const barcode = normalizeBarcode(getVal(row, ["barcode", "barcodes"]));
+      if (!barcode) return null;
+
+      const barcodesRaw = normalizeBarcode(getVal(row, ["barcodes"]));
+      const allBarcodes = new Set(
+        [barcode, ...barcodesRaw.split(",").map((x) => normalizeBarcode(x)).filter(Boolean)]
+      );
+
+      const unitPrice = toNumberOrZero(getVal(row, ["newprices", "unitpriceusd", "priceusd"]));
+      const importedPrice = toNumberOrZero(getVal(row, ["unitpriceusd", "newprices", "priceusd"]));
+      const itemName = String(getVal(row, ["itemname", "name"]) || "").trim();
+
+      return {
+        barcode,
+        alt_barcodes: Array.from(allBarcodes).join(","),
+        item_id: toNumberOrZero(getVal(row, ["itemid"])),
+        source_id: toNumberOrZero(getVal(row, ["id"])),
+        sku: String(getVal(row, ["sku"]) || "").trim(),
+        item_name: itemName,
+        brand: String(getVal(row, ["brand"]) || "").trim(),
+        store_name: String(getVal(row, ["storename"]) || "").trim(),
+        category: String(getVal(row, ["catref", "category"]) || "").trim(),
+        category_id: toNumberOrZero(getVal(row, ["catid"])),
+        sub_category: String(getVal(row, ["subcatref", "subcategory"]) || "").trim(),
+        sub_category_id: toNumberOrZero(getVal(row, ["subcatid"])),
+        unit_price_usd: unitPrice,
+        import_price_usd: importedPrice,
+        cost_usd: toNumberOrZero(getVal(row, ["costusd", "unitcostusd"])) || unitPrice,
+        measurement_unit: String(getVal(row, ["measurementunit"]) || "").trim(),
+        measurement_value: String(getVal(row, ["measurementvalue"]) || "").trim(),
+        description: String(getVal(row, ["description"]) || "").trim(),
+        image_url: String(getVal(row, ["image", "imageurl", "urlimages"]) || "").trim(),
+        stock_quantity: toNumberOrZero(getVal(row, ["quantity", "stockquantity"])),
+      };
+    })
+    .filter(Boolean);
 
   return productsDb.importProducts(rows);
 
@@ -386,19 +434,21 @@ ipcMain.handle("products:exportExcel", async () => {
   const workbook = XLSX.utils.book_new();
 
   const sheetData = rows.map((r) => ({
-    Barcode: r.barcode,
-    SKU: r.sku,
-    "Item Name": r.item_name,
-    Brand: r.brand,
-    Category: r.category,
-    "Sub Category": r.sub_category,
-    "Unit Price (USD)": r.unit_price_usd,
-    "Cost (USD)": r.cost_usd,
-    "Measurement Unit": r.measurement_unit,
-    "Measurement Value": r.measurement_value,
-    Description: r.description,
-    "Stock Quantity": r.stock_quantity,
-    "Updated At": r.updated_at,
+    item_id: r.item_id ?? "",
+    cat_id: r.category_id ?? "",
+    cat_ref: r.category ?? "",
+    sub_cat_id: r.sub_category_id ?? "",
+    sub_cat_ref: r.sub_category ?? "",
+    measurement_unit: r.measurement_unit ?? "",
+    measurement_value: r.measurement_value ?? "",
+    barcode: r.barcode ?? "",
+    barcodes: r.alt_barcodes || r.barcode || "",
+    image: r.image_url ?? "",
+    id: r.source_id ?? "",
+    unit_price_usd: r.import_price_usd ?? r.unit_price_usd ?? 0,
+    "NEW PRICES ": r.unit_price_usd ?? 0,
+    "Store Name": r.store_name ?? "",
+    "Item Name": r.item_name ?? "",
   }));
 
   const sheet = XLSX.utils.json_to_sheet(sheetData);

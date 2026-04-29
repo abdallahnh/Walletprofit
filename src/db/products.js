@@ -9,14 +9,21 @@ function importProducts(rows) {
       item_name,
       sku,
       brand,
+      store_name,
+      item_id,
+      source_id,
       category,
+      category_id,
       sub_category,
+      sub_category_id,
       unit_price_usd,
       cost_usd,
       measurement_unit,
       measurement_value,
       description,
       image_url,
+      alt_barcodes,
+      import_price_usd,
       stock_quantity,
       updated_at
     )
@@ -25,14 +32,21 @@ function importProducts(rows) {
       @item_name,
       @sku,
       @brand,
+      @store_name,
+      @item_id,
+      @source_id,
       @category,
+      @category_id,
       @sub_category,
+      @sub_category_id,
       @unit_price_usd,
       @cost_usd,
       @measurement_unit,
       @measurement_value,
       @description,
       @image_url,
+      @alt_barcodes,
+      @import_price_usd,
       @stock_quantity,
       datetime('now')
     )
@@ -40,14 +54,21 @@ function importProducts(rows) {
       item_name = excluded.item_name,
       sku = excluded.sku,
       brand = excluded.brand,
+      store_name = excluded.store_name,
+      item_id = excluded.item_id,
+      source_id = excluded.source_id,
       category = excluded.category,
+      category_id = excluded.category_id,
       sub_category = excluded.sub_category,
+      sub_category_id = excluded.sub_category_id,
       unit_price_usd = excluded.unit_price_usd,
       cost_usd = excluded.cost_usd,
       measurement_unit = excluded.measurement_unit,
       measurement_value = excluded.measurement_value,
       description = excluded.description,
       image_url = excluded.image_url,
+      alt_barcodes = excluded.alt_barcodes,
+      import_price_usd = excluded.import_price_usd,
       stock_quantity = excluded.stock_quantity,
       updated_at = datetime('now')
   `);
@@ -78,15 +99,23 @@ function getProducts() {
 
 function findProductByBarcode(barcode) {
   const db = getDb();
+  const key = String(barcode || "").trim();
+  if (!key) return null;
+
   return db
     .prepare(
       `
     SELECT *
     FROM products
     WHERE barcode = ?
+       OR alt_barcodes = ?
+       OR alt_barcodes LIKE ?
+       OR alt_barcodes LIKE ?
+       OR alt_barcodes LIKE ?
+    LIMIT 1
   `
     )
-    .get(barcode);
+    .get(key, key, `${key},%`, `%,${key},%`, `%,${key}`);
 }
 
 function updateProduct(barcode, updates) {
@@ -134,16 +163,24 @@ function exportProductsExcel() {
       `
     SELECT 
       barcode,
+      alt_barcodes,
+      item_id,
+      source_id,
+      category_id,
+      sub_category_id,
       item_name,
+      store_name,
       sku,
       brand,
       category,
       sub_category,
       unit_price_usd,
+      import_price_usd,
       cost_usd,
       measurement_unit,
       measurement_value,
       description,
+      image_url,
       stock_quantity,
       updated_at
     FROM products
