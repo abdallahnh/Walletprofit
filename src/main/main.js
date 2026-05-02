@@ -493,24 +493,71 @@ ipcMain.handle("sales:syncFromOrders", async () => {
   const uniqueOrders = [];
   const seen = new Set();
   for (const o of list || []) {
+    if (!o?.code || !o?.id) continue;
     if (!seen.has(o.code)) {
       seen.add(o.code);
       uniqueOrders.push(o);
     }
   }
 
+  const skippedInvalidSummaries = Math.max(0, (list || []).length - uniqueOrders.length);
+
   let processed = 0;
+  let detailsLoaded = 0;
+  let detailsMissing = 0;
+  let detailsFailed = 0;
+  let ordersWithMatchedItems = 0;
+  let ordersWithoutMatchedItems = 0;
+  let totalOrderItems = 0;
+  let matchedOrderItems = 0;
+  let skippedNoBarcodeItems = 0;
+  let skippedUnmatchedProductItems = 0;
 
   for (const o of uniqueOrders) {
     try {
-      await loadDetailsByCode(o.code);
+      const detailed = await loadDetailsByCode(o.code);
+      const sync = detailed?._salesSync || null;
       processed += 1;
+
+      if (detailed) {
+        detailsLoaded += 1;
+      } else {
+        detailsMissing += 1;
+      }
+
+      if (sync) {
+        totalOrderItems += Number(sync.total_items || 0);
+        matchedOrderItems += Number(sync.matched_items || 0);
+        skippedNoBarcodeItems += Number(sync.skipped_no_barcode || 0);
+        skippedUnmatchedProductItems += Number(sync.skipped_unmatched_product || 0);
+
+        if (Number(sync.inserted_rows || 0) > 0) {
+          ordersWithMatchedItems += 1;
+        } else {
+          ordersWithoutMatchedItems += 1;
+        }
+      }
     } catch (e) {
+      detailsFailed += 1;
       logger.error("Failed to sync order to sales", { code: o.code, error: String(e) });
     }
   }
 
-  return { ok: true, processed };
+  return {
+    ok: true,
+    fetched: uniqueOrders.length,
+    skippedInvalidSummaries,
+    processed,
+    detailsLoaded,
+    detailsMissing,
+    detailsFailed,
+    ordersWithMatchedItems,
+    ordersWithoutMatchedItems,
+    totalOrderItems,
+    matchedOrderItems,
+    skippedNoBarcodeItems,
+    skippedUnmatchedProductItems,
+  };
 });
 
 ipcMain.handle("sales:exportExcel", async (_evt, opts) => {

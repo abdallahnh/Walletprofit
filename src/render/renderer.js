@@ -323,7 +323,21 @@ $("btnSyncSales").addEventListener("click", async () => {
       setError(res?.error || "Sync sales failed");
       return;
     }
-    alert(`Synced sales from orders. Processed orders: ${res.processed}`);
+    alert(
+      `Synced sales from orders.\n` +
+      `Fetched: ${res.fetched || 0}\n` +
+      `Skipped invalid summaries: ${res.skippedInvalidSummaries || 0}\n` +
+      `Processed: ${res.processed || 0}\n` +
+      `Details loaded: ${res.detailsLoaded || 0}\n` +
+      `Details missing: ${res.detailsMissing || 0}\n` +
+      `Details failed: ${res.detailsFailed || 0}\n` +
+      `Orders with matched items: ${res.ordersWithMatchedItems || 0}\n` +
+      `Orders without matched items: ${res.ordersWithoutMatchedItems || 0}\n` +
+      `Total items: ${res.totalOrderItems || 0}\n` +
+      `Matched items: ${res.matchedOrderItems || 0}\n` +
+      `Skipped (no barcode): ${res.skippedNoBarcodeItems || 0}\n` +
+      `Skipped (unmatched product): ${res.skippedUnmatchedProductItems || 0}`
+    );
   } catch (e) {
     $("btnSyncSales").disabled = false;
     statusEl.textContent = "";

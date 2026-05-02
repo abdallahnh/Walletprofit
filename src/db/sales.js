@@ -1,11 +1,53 @@
 const { getDb } = require("./database");
 const { findProductByBarcode } = require("./products");
-const { getWalletConfig } = require("./wallet");
+const { getWalletConfig, normalizeType } = require("./wallet");
+
+function getOrderAdjustmentsUsd(db, orderCode, lbpToUsdRate) {
+  if (!orderCode) return { serviceVatUsd: 0, incentiveUsd: 0 };
+
+  const txRows = db
+    .prepare(
+      `
+    SELECT amount, type
+    FROM transactions
+    WHERE order_code = ?
+  `
+    )
+    .all(orderCode);
+
+  let service = 0;
+  let vat = 0;
+  let incentive = 0;
+  for (const r of txRows) {
+    const kind = normalizeType(r.type);
+    const amt = Number(r.amount || 0);
+    if (kind === "service_fee") service += amt;
+    if (kind === "vat") vat += amt;
+    if (kind === "incentive") incentive += Math.abs(amt);
+  }
+
+  return {
+    serviceVatUsd: (service + vat) * lbpToUsdRate,
+    incentiveUsd: incentive * lbpToUsdRate,
+  };
+}
 
 function recordOrderItemsToSales(order) {
   const db = getDb();
   const items = order.order_detail || [];
-  if (!items.length) return;
+  if (!items.length) {
+    return {
+      order_code: order?.code || null,
+      total_items: 0,
+      matched_items: 0,
+      inserted_rows: 0,
+      skipped_no_barcode: 0,
+      skipped_unmatched_product: 0,
+    };
+  }
+
+  // Keep sync idempotent: re-syncing the same order should overwrite prior sales rows.
+  db.prepare("DELETE FROM sales WHERE order_code = ?").run(order.code);
 
   // Get currency conversion rate
   const cfg = getWalletConfig();
@@ -14,13 +56,23 @@ function recordOrderItemsToSales(order) {
 
   // Aggregate items by barcode to handle duplicates
   const aggregatedItems = {};
+  let skippedNoBarcode = 0;
+  let skippedUnmatchedProduct = 0;
+  let matchedItems = 0;
   for (const d of items) {
     const item = d.item || {};
     const barcode = item.barcode;
-    if (!barcode) continue;
+    if (!barcode) {
+      skippedNoBarcode += 1;
+      continue;
+    }
 
     const product = findProductByBarcode(barcode);
-    if (!product) continue;
+    if (!product) {
+      skippedUnmatchedProduct += 1;
+      continue;
+    }
+    matchedItems += 1;
 
     const qty = Number(d.quantity || 0);
     const priceLbp = Number(d.item_price || 0);
@@ -40,6 +92,12 @@ function recordOrderItemsToSales(order) {
   }
 
   const createdAt = order.created_at || new Date().toISOString();
+  const { serviceVatUsd: orderServiceVatUsd, incentiveUsd: orderIncentiveUsd } =
+    getOrderAdjustmentsUsd(db, order.code, lbpToUsdRate);
+  const totalOrderRevenueUsd = Object.values(aggregatedItems).reduce(
+    (sum, it) => sum + Number(it.quantity || 0) * Number(it.priceUsd || 0),
+    0
+  );
 
   // Simple insert - let duplicates exist for now
   const insertStmt = db.prepare(
@@ -59,12 +117,20 @@ function recordOrderItemsToSales(order) {
   `
   );
 
+  let insertedRows = 0;
   for (const [barcode, data] of Object.entries(aggregatedItems)) {
     const { product, quantity, priceUsd } = data;
 
-    const total = quantity * priceUsd;
+    const grossTotal = quantity * priceUsd;
     const cost = (product.cost_usd || 0) * quantity;
-    const profit = total - cost;
+    const feeShare =
+      totalOrderRevenueUsd > 0 ? (grossTotal / totalOrderRevenueUsd) * orderServiceVatUsd : 0;
+    const incentiveShare =
+      totalOrderRevenueUsd > 0 ? (grossTotal / totalOrderRevenueUsd) * orderIncentiveUsd : 0;
+
+    // Merchant revenue is what remains after platform fees and VAT, plus incentives.
+    const merchantRevenue = grossTotal - feeShare + incentiveShare;
+    const profit = merchantRevenue - cost;
 
     try {
       insertStmt.run(
@@ -74,15 +140,25 @@ function recordOrderItemsToSales(order) {
         quantity,
         priceUsd,
         cost,
-        total,
+        merchantRevenue,
         profit,
         createdAt
       );
+      insertedRows += 1;
     } catch (e) {
       // Ignore duplicate errors for now
       console.log('Ignoring sales insert error:', e.message);
     }
   }
+
+  return {
+    order_code: order?.code || null,
+    total_items: items.length,
+    matched_items: matchedItems,
+    inserted_rows: insertedRows,
+    skipped_no_barcode: skippedNoBarcode,
+    skipped_unmatched_product: skippedUnmatchedProduct,
+  };
 }
 
 function getSalesReport(opts = {}) {

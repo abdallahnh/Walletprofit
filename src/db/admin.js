@@ -18,7 +18,12 @@ function getTableRows(table, limit = 200) {
 function clearTable(table) {
   assertTable(table);
   const db = getDb();
-  db.prepare(`DELETE FROM ${table}`).run();
+  const tx = db.transaction(() => {
+    db.prepare(`DELETE FROM ${table}`).run();
+    // Reset AUTOINCREMENT so next inserted row starts from 1.
+    db.prepare("DELETE FROM sqlite_sequence WHERE name = ?").run(table);
+  });
+  tx();
   return { ok: true };
 }
 

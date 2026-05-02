@@ -89,6 +89,7 @@ function initDatabase(userDataPath) {
 
   // Lightweight schema migrations for existing databases.
   ensureProductsColumns(db);
+  ensureSalesUniqueness(db);
 
   // Ensure a default wallet config row exists
   const existing = db.prepare("SELECT value FROM config WHERE key=?").get("walletConfig");
@@ -128,6 +129,24 @@ function ensureProductsColumns(dbConn) {
       dbConn.exec(`ALTER TABLE products ADD COLUMN ${name} ${type}`);
     }
   }
+}
+
+function ensureSalesUniqueness(dbConn) {
+  // Remove legacy duplicates so unique index creation can succeed.
+  dbConn.exec(`
+    DELETE FROM sales
+    WHERE id NOT IN (
+      SELECT MAX(id)
+      FROM sales
+      GROUP BY order_code, barcode
+    )
+  `);
+
+  dbConn.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_order_barcode
+    ON sales(order_code, barcode)
+    WHERE order_code IS NOT NULL AND barcode IS NOT NULL
+  `);
 }
 
 function getDb() {
