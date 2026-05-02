@@ -160,7 +160,21 @@ ipcMain.handle("totals:get", async (_evt, opts) => {
 });
 
 ipcMain.handle("orderMeta:set", async (_evt, payload) => {
-  return ordersDb.upsertOrderMeta(payload);
+  const res = ordersDb.upsertOrderMeta(payload);
+  if (!res?.ok) return res;
+
+  try {
+    const cfg = walletDb.getWalletConfig();
+    const usdToLbpRate = Number(cfg?.usdToLbpRate || 90000);
+    salesDb.applyOrderSupplierCost(payload?.order_code, payload?.supplier_cost, usdToLbpRate);
+  } catch (e) {
+    logger.error("Failed to apply supplier cost override on sales rows", {
+      order_code: payload?.order_code,
+      error: String(e),
+    });
+  }
+
+  return res;
 });
 
 ipcMain.handle("supplier:reset", async () => {

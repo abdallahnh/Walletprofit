@@ -3,7 +3,13 @@ const { getDb } = require("./database");
 function importProducts(rows) {
   const db = getDb();
 
-  const stmt = db.prepare(`
+  const getExistingStmt = db.prepare(`
+    SELECT id, unit_price_usd, cost_usd
+    FROM products
+    WHERE barcode = ?
+  `);
+
+  const upsertStmt = db.prepare(`
     INSERT INTO products (
       barcode,
       item_name,
@@ -73,9 +79,37 @@ function importProducts(rows) {
       updated_at = datetime('now')
   `);
 
+  const insertPriceHistoryStmt = db.prepare(`
+    INSERT INTO product_price_history (
+      product_id,
+      barcode,
+      unit_price_usd,
+      cost_usd,
+      effective_at
+    )
+    VALUES (?, ?, ?, ?, datetime('now'))
+  `);
+
   const insertMany = db.transaction((items) => {
     for (const r of items) {
-      stmt.run(r);
+      const existing = getExistingStmt.get(r.barcode);
+      upsertStmt.run(r);
+
+      const current = getExistingStmt.get(r.barcode);
+      if (!current) continue;
+
+      const isNew = !existing;
+      const priceChanged = Number(existing?.unit_price_usd ?? 0) !== Number(current.unit_price_usd ?? 0);
+      const costChanged = Number(existing?.cost_usd ?? 0) !== Number(current.cost_usd ?? 0);
+
+      if (isNew || priceChanged || costChanged) {
+        insertPriceHistoryStmt.run(
+          current.id,
+          r.barcode,
+          Number(current.unit_price_usd || 0),
+          Number(current.cost_usd || 0)
+        );
+      }
     }
   });
 
@@ -151,8 +185,40 @@ function updateProduct(barcode, updates) {
   
   values.push(barcode);
   
+  const getCurrent = db.prepare(`
+    SELECT id, unit_price_usd, cost_usd
+    FROM products
+    WHERE barcode = ?
+  `);
+  const before = getCurrent.get(barcode);
   const result = db.prepare(sql).run(...values);
-  
+  const after = getCurrent.get(barcode);
+
+  if (result.changes > 0 && after) {
+    const priceChanged = Number(before?.unit_price_usd ?? 0) !== Number(after.unit_price_usd ?? 0);
+    const costChanged = Number(before?.cost_usd ?? 0) !== Number(after.cost_usd ?? 0);
+
+    if (priceChanged || costChanged) {
+      db.prepare(
+        `
+        INSERT INTO product_price_history (
+          product_id,
+          barcode,
+          unit_price_usd,
+          cost_usd,
+          effective_at
+        )
+        VALUES (?, ?, ?, ?, datetime('now'))
+      `
+      ).run(
+        after.id,
+        barcode,
+        Number(after.unit_price_usd || 0),
+        Number(after.cost_usd || 0)
+      );
+    }
+  }
+
   return { ok: true, changes: result.changes };
 }
 

@@ -132,6 +132,27 @@ td.num, th.num {
     .modal-body input { width:100%; padding:10px; border:1px solid #ddd; border-radius:10px; font-size:12px; }
     .modal-actions { display:flex; gap:10px; justify-content:flex-end; margin-top: 8px; }
     .hint { font-size:12px; color:#666; margin-top: 6px; }
+.columns-panel {
+  display: none;
+  position: absolute;
+  right: 16px;
+  top: 132px;
+  z-index: 20;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+  padding: 10px;
+  min-width: 220px;
+}
+.columns-panel.open { display: block; }
+.columns-panel label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  margin: 6px 0;
+}
   </style>
 </head>
 <body>
@@ -227,13 +248,21 @@ td.num, th.num {
         <input type="checkbox" id="chkSettlements" />
         Include Settlements
       </label>
+      <select id="selPaidFilter" class="inp" style="margin-left: 8px;">
+        <option value="all">All</option>
+        <option value="paid">Paid only</option>
+        <option value="unpaid">Not paid</option>
+      </select>
       <select id="selCurrencyDisplay" class="inp" style="margin-left: 8px;">
         <option value="USD">USD</option>
         <option value="LBP">LBP</option>
       </select>
+      <button class="menu-btn" id="btnColumns">Columns</button>
       <button class="menu-btn danger" id="btnResetSupplier">Reset Costs</button>
     </div>
   </div>
+
+  <div id="columnsPanel" class="columns-panel"></div>
 
   <div class="error" id="err"></div>
 
@@ -243,19 +272,19 @@ td.num, th.num {
     <table id="table">
       <thead>
         <tr>
-          <th></th>
-          <th>Order</th>
-          <th class="num">Gross</th>
-          <th class="num">Service</th>
-          <th class="num">VAT</th>
-          <th class="num">Incentive</th>
-          <th class="num">Merchant Payout</th>
-          <th class="num">Toters Margin</th>
-          <th class="num">Supplier Cost</th>
-          <th>Paid</th>
-          <th class="num">Net Profit</th>
-          <th class="num">Rows</th>
-          <th>Dates</th>
+          <th data-col="view"></th>
+          <th data-col="order">Order</th>
+          <th class="num" data-col="gross">Gross</th>
+          <th class="num" data-col="service">Service</th>
+          <th class="num" data-col="vat">VAT</th>
+          <th class="num" data-col="incentive">Incentive</th>
+          <th class="num" data-col="merchant_payout">Merchant Payout</th>
+          <th class="num" data-col="toters_margin">Toters Margin</th>
+          <th class="num" data-col="supplier_cost">Supplier Cost</th>
+          <th data-col="paid">Paid</th>
+          <th class="num" data-col="net_profit">Net Profit</th>
+          <th class="num" data-col="rows">Rows</th>
+          <th data-col="dates">Dates</th>
         </tr>
       </thead>
       <tbody id="tbody"></tbody>

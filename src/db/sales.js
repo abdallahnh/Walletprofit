@@ -32,6 +32,39 @@ function getOrderAdjustmentsUsd(db, orderCode, lbpToUsdRate) {
   };
 }
 
+function getOrderMeta(db, orderCode) {
+  if (!orderCode) return null;
+  return db
+    .prepare(
+      `
+    SELECT supplier_cost, supplier_paid
+    FROM order_meta
+    WHERE order_code = ?
+  `
+    )
+    .get(orderCode);
+}
+
+function getEffectiveProductCostUsd(db, productId, asOf, fallbackCostUsd) {
+  if (!productId || !asOf) return Number(fallbackCostUsd || 0);
+
+  const row = db
+    .prepare(
+      `
+    SELECT cost_usd
+    FROM product_price_history
+    WHERE product_id = ?
+      AND datetime(effective_at) <= datetime(?)
+    ORDER BY datetime(effective_at) DESC
+    LIMIT 1
+  `
+    )
+    .get(productId, asOf);
+
+  if (!row || row.cost_usd == null) return Number(fallbackCostUsd || 0);
+  return Number(row.cost_usd || 0);
+}
+
 function recordOrderItemsToSales(order) {
   const db = getDb();
   const items = order.order_detail || [];
@@ -92,6 +125,11 @@ function recordOrderItemsToSales(order) {
   }
 
   const createdAt = order.created_at || new Date().toISOString();
+  const orderMeta = getOrderMeta(db, order.code);
+  const hasSupplierOverride = Number(orderMeta?.supplier_cost || 0) > 0;
+  const supplierOverrideCostUsd = hasSupplierOverride
+    ? Number(orderMeta.supplier_cost || 0) * lbpToUsdRate
+    : 0;
   const { serviceVatUsd: orderServiceVatUsd, incentiveUsd: orderIncentiveUsd } =
     getOrderAdjustmentsUsd(db, order.code, lbpToUsdRate);
   const totalOrderRevenueUsd = Object.values(aggregatedItems).reduce(
@@ -122,7 +160,18 @@ function recordOrderItemsToSales(order) {
     const { product, quantity, priceUsd } = data;
 
     const grossTotal = quantity * priceUsd;
-    const cost = (product.cost_usd || 0) * quantity;
+    const historicalCostUsd = getEffectiveProductCostUsd(
+      db,
+      product.id,
+      createdAt,
+      product.cost_usd || 0
+    );
+    const defaultCost = historicalCostUsd * quantity;
+    const overrideCost =
+      totalOrderRevenueUsd > 0
+        ? (grossTotal / totalOrderRevenueUsd) * supplierOverrideCostUsd
+        : 0;
+    const cost = hasSupplierOverride ? overrideCost : defaultCost;
     const feeShare =
       totalOrderRevenueUsd > 0 ? (grossTotal / totalOrderRevenueUsd) * orderServiceVatUsd : 0;
     const incentiveShare =
@@ -441,8 +490,70 @@ function getProfitMarginAnalysis(opts = {}) {
   }));
 }
 
+function applyOrderSupplierCost(orderCode, supplierCostLbp, usdToLbpRate = 90000) {
+  const db = getDb();
+  const code = String(orderCode || "").trim();
+  if (!code) return { ok: false, error: "Missing order code" };
+
+  const rows = db
+    .prepare(
+      `
+    SELECT id, product_id, quantity, total_sale, created_at
+    FROM sales
+    WHERE order_code = ?
+  `
+    )
+    .all(code);
+
+  if (!rows.length) {
+    return { ok: true, affectedRows: 0 };
+  }
+
+  const totalSale = rows.reduce((sum, r) => sum + Number(r.total_sale || 0), 0);
+  const useOverride = Number(supplierCostLbp || 0) > 0;
+  const overrideCostUsd = useOverride ? Number(supplierCostLbp || 0) / Number(usdToLbpRate || 90000) : 0;
+
+  const updateStmt = db.prepare(`
+    UPDATE sales
+    SET cost = ?, profit = ?
+    WHERE id = ?
+  `);
+
+  const productCostStmt = db.prepare(`
+    SELECT cost_usd
+    FROM products
+    WHERE id = ?
+  `);
+
+  const run = db.transaction(() => {
+    for (const row of rows) {
+      const saleValue = Number(row.total_sale || 0);
+      let cost = 0;
+      if (useOverride) {
+        cost = totalSale > 0 ? (saleValue / totalSale) * overrideCostUsd : 0;
+      } else {
+        const p = productCostStmt.get(row.product_id);
+        const historicalCostUsd = getEffectiveProductCostUsd(
+          db,
+          row.product_id,
+          row.created_at,
+          p?.cost_usd || 0
+        );
+        cost = historicalCostUsd * Number(row.quantity || 0);
+      }
+
+      const profit = saleValue - cost;
+      updateStmt.run(cost, profit, row.id);
+    }
+  });
+
+  run();
+  return { ok: true, affectedRows: rows.length };
+}
+
 module.exports = {
   recordOrderItemsToSales,
+  applyOrderSupplierCost,
   getSalesReport,
   getRevenueByPeriod,
   getTopProductsByRevenue,

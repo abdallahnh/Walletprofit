@@ -85,11 +85,24 @@ function initDatabase(userDataPath) {
 
     CREATE INDEX IF NOT EXISTS idx_sales_order_barcode
       ON sales(order_code, barcode);
+
+    CREATE TABLE IF NOT EXISTS product_price_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      product_id INTEGER NOT NULL,
+      barcode TEXT,
+      unit_price_usd REAL,
+      cost_usd REAL,
+      effective_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_price_history_product_effective
+      ON product_price_history(product_id, effective_at DESC);
   `);
 
   // Lightweight schema migrations for existing databases.
   ensureProductsColumns(db);
   ensureSalesUniqueness(db);
+  ensurePriceHistory(db);
 
   // Ensure a default wallet config row exists
   const existing = db.prepare("SELECT value FROM config WHERE key=?").get("walletConfig");
@@ -146,6 +159,36 @@ function ensureSalesUniqueness(dbConn) {
     CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_order_barcode
     ON sales(order_code, barcode)
     WHERE order_code IS NOT NULL AND barcode IS NOT NULL
+  `);
+}
+
+function ensurePriceHistory(dbConn) {
+  dbConn.exec(`
+    CREATE TABLE IF NOT EXISTS product_price_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      product_id INTEGER NOT NULL,
+      barcode TEXT,
+      unit_price_usd REAL,
+      cost_usd REAL,
+      effective_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  dbConn.exec(`
+    CREATE INDEX IF NOT EXISTS idx_price_history_product_effective
+    ON product_price_history(product_id, effective_at DESC)
+  `);
+
+  // Backfill a baseline snapshot for products that have no history yet.
+  dbConn.exec(`
+    INSERT INTO product_price_history (product_id, barcode, unit_price_usd, cost_usd, effective_at)
+    SELECT p.id, p.barcode, p.unit_price_usd, p.cost_usd, COALESCE(p.updated_at, p.created_at, CURRENT_TIMESTAMP)
+    FROM products p
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM product_price_history h
+      WHERE h.product_id = p.id
+    )
   `);
 }
 

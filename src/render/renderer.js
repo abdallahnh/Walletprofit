@@ -7,6 +7,9 @@ const tbody = $("tbody");
 
 const chkSettlements = $("chkSettlements");
 const selCurrencyDisplay = $("selCurrencyDisplay");
+const selPaidFilter = $("selPaidFilter");
+const btnColumns = $("btnColumns");
+const columnsPanel = $("columnsPanel");
 
 const salesFrom = $("salesFrom");
 const salesTo = $("salesTo");
@@ -24,6 +27,72 @@ const walletMsg = $("walletModalMsg");
 
 let currentCurrency = "USD";
 let usdToLbpRate = 90000;
+let allRowsCache = [];
+let currentRowsView = [];
+
+const COLUMN_DEFS = [
+  { key: "view", label: "View" },
+  { key: "order", label: "Order" },
+  { key: "gross", label: "Gross" },
+  { key: "service", label: "Service" },
+  { key: "vat", label: "VAT" },
+  { key: "incentive", label: "Incentive" },
+  { key: "merchant_payout", label: "Merchant Payout" },
+  { key: "toters_margin", label: "Toters Margin" },
+  { key: "supplier_cost", label: "Supplier Cost" },
+  { key: "paid", label: "Paid" },
+  { key: "net_profit", label: "Net Profit" },
+  { key: "rows", label: "Rows" },
+  { key: "dates", label: "Dates" },
+];
+
+function getVisibleColumns() {
+  try {
+    const raw = localStorage.getItem("wallet-columns-visible");
+    if (!raw) return COLUMN_DEFS.map((c) => c.key);
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) return COLUMN_DEFS.map((c) => c.key);
+    return parsed;
+  } catch {
+    return COLUMN_DEFS.map((c) => c.key);
+  }
+}
+
+function saveVisibleColumns(keys) {
+  localStorage.setItem("wallet-columns-visible", JSON.stringify(keys));
+}
+
+function applyColumnVisibility() {
+  const visible = new Set(getVisibleColumns());
+  document.querySelectorAll("th[data-col], td[data-col]").forEach((el) => {
+    const key = el.getAttribute("data-col");
+    el.style.display = visible.has(key) ? "" : "none";
+  });
+}
+
+function renderColumnsPanel() {
+  const visible = new Set(getVisibleColumns());
+  columnsPanel.innerHTML = COLUMN_DEFS.map((col) => `
+    <label>
+      <input type="checkbox" data-col-check="${col.key}" ${visible.has(col.key) ? "checked" : ""} />
+      ${col.label}
+    </label>
+  `).join("");
+
+  columnsPanel.querySelectorAll("input[data-col-check]").forEach((chk) => {
+    chk.addEventListener("change", () => {
+      const next = Array.from(columnsPanel.querySelectorAll("input[data-col-check]"))
+        .filter((x) => x.checked)
+        .map((x) => x.getAttribute("data-col-check"));
+      if (!next.length) {
+        chk.checked = true;
+        return;
+      }
+      saveVisibleColumns(next);
+      applyColumnVisibility();
+    });
+  });
+}
 
 function fmt(n, currency = currentCurrency) {
   const x = Number(n) || 0;
@@ -67,6 +136,45 @@ function setStats(t) {
     .join("");
 }
 
+function calculateTotalsFromRows(rows, includeSettlements) {
+  const totals = {
+    orders: rows.length,
+    gross: 0,
+    service_fee: 0,
+    vat: 0,
+    incentive: 0,
+    merchantPayout: 0,
+    totersMargin: 0,
+    supplierCost: 0,
+    netProfit: 0,
+    settlements: 0,
+    netProfitWithSettlements: includeSettlements ? 0 : null,
+  };
+
+  for (const r of rows) {
+    totals.gross += Number(r.gross || 0);
+    totals.service_fee += Number(r.service_fee || 0);
+    totals.vat += Number(r.vat || 0);
+    totals.incentive += Number(r.incentive || 0);
+    totals.merchantPayout += Number(r.merchant_payout || 0);
+    totals.totersMargin += Number(r.toters_margin || 0);
+    totals.supplierCost += Number(r.supplier_cost || 0);
+    totals.netProfit += Number(r.net_profit || 0);
+  }
+
+  if (includeSettlements) {
+    totals.netProfitWithSettlements = totals.netProfit + totals.settlements;
+  }
+  return totals;
+}
+
+function getFilteredRows(rows) {
+  const paidFilter = selPaidFilter.value || "all";
+  if (paidFilter === "paid") return rows.filter((r) => !!r.supplier_paid);
+  if (paidFilter === "unpaid") return rows.filter((r) => !r.supplier_paid);
+  return rows;
+}
+
 function renderRows(rows) {
   tbody.innerHTML = "";
 
@@ -74,38 +182,30 @@ function renderRows(rows) {
     const tr = document.createElement("tr");
 
     tr.innerHTML = `
-      <td>
+      <td data-col="view">
   <button class="view-btn" data-code="${r.order_code}">
     View
   </button></td>
-      <td>${r.order_code}</td>
-      <td class="num">${fmt(r.gross)}</td>
-      <td class="num">${fmt(r.service_fee)}</td>
-      <td class="num">${fmt(r.vat)}</td>
-      <td class="num">${fmt(r.incentive)}</td>
-      <td class="num">${fmt(r.merchant_payout)}</td>
-      <td class="num">${fmt(r.toters_margin)}</td>
-      <td class="num">
+      <td data-col="order">${r.order_code}</td>
+      <td class="num" data-col="gross">${fmt(r.gross)}</td>
+      <td class="num" data-col="service">${fmt(r.service_fee)}</td>
+      <td class="num" data-col="vat">${fmt(r.vat)}</td>
+      <td class="num" data-col="incentive">${fmt(r.incentive)}</td>
+      <td class="num" data-col="merchant_payout">${fmt(r.merchant_payout)}</td>
+      <td class="num" data-col="toters_margin">${fmt(r.toters_margin)}</td>
+      <td class="num" data-col="supplier_cost">
         <input class="inp" data-order="${r.order_code}" data-kind="cost" value="${r.supplier_cost || 0}" />
       </td>
-      <td>
+      <td data-col="paid">
         <input type="checkbox" data-order="${r.order_code}" data-kind="paid" ${r.supplier_paid ? "checked" : ""} />
       </td>
-      <td class="num">${fmt(r.net_profit)}</td>
-      <td class="num">${r.row_count}</td>
-      <td>${r.dates || ""}</td>
+      <td class="num" data-col="net_profit">${fmt(r.net_profit)}</td>
+      <td class="num" data-col="rows">${r.row_count}</td>
+      <td data-col="dates">${r.dates || ""}</td>
     `;
 
     tbody.appendChild(tr);
   }
-
-  document.getElementById("btnProducts").addEventListener("click", () => {
-    window.api.openProducts();
-  });
-
-  document.getElementById("btnRevenueDashboard").addEventListener("click", () => {
-    window.api.openRevenueDashboard();
-  });
 
   document.querySelectorAll(".view-btn").forEach(btn => {
   btn.addEventListener("click", () => {
@@ -138,18 +238,18 @@ function renderRows(rows) {
       await refresh();
     });
   });
+
+  applyColumnVisibility();
 }
 
 async function refresh() {
   setError("");
   const includeSettlements = chkSettlements.checked;
-  const [rows, totals] = await Promise.all([
-    window.api.ordersGetReconciliation(),
-    window.api.totalsGet({ includeSettlements })
-  ]);
-
-  renderRows(rows);
-  setStats(totals);
+  const rows = await window.api.ordersGetReconciliation();
+  allRowsCache = rows;
+  currentRowsView = getFilteredRows(rows);
+  renderRows(currentRowsView);
+  setStats(calculateTotalsFromRows(currentRowsView, includeSettlements));
 }
 
 async function loadWalletConfig() {
@@ -247,6 +347,12 @@ $("btnWalletSync").addEventListener("click", async () => {
 $("btnDbAdmin").addEventListener("click", () => {
   window.api.openDbAdmin();
 });
+$("btnProducts").addEventListener("click", () => {
+  window.api.openProducts();
+});
+$("btnRevenueDashboard").addEventListener("click", () => {
+  window.api.openRevenueDashboard();
+});
 
 // Modal buttons
 $("btnWalletClose").addEventListener("click", closeWalletModal);
@@ -279,6 +385,22 @@ chkSettlements.addEventListener("change", () => {
 selCurrencyDisplay.addEventListener("change", () => {
   currentCurrency = selCurrencyDisplay.value;
   refresh().catch(setError);
+});
+
+selPaidFilter.addEventListener("change", () => {
+  currentRowsView = getFilteredRows(allRowsCache);
+  renderRows(currentRowsView);
+  setStats(calculateTotalsFromRows(currentRowsView, chkSettlements.checked));
+});
+
+btnColumns.addEventListener("click", () => {
+  columnsPanel.classList.toggle("open");
+});
+
+document.addEventListener("click", (e) => {
+  if (!columnsPanel.classList.contains("open")) return;
+  if (columnsPanel.contains(e.target) || e.target === btnColumns) return;
+  columnsPanel.classList.remove("open");
 });
 
 $("btnGenerateSales").addEventListener("click", async () => {
@@ -347,5 +469,7 @@ $("btnSyncSales").addEventListener("click", async () => {
 
 // Initial load
 loadWalletConfig().then(() => {
+  renderColumnsPanel();
+  applyColumnVisibility();
   refresh().catch(setError);
 });
