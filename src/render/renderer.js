@@ -8,6 +8,7 @@ const tbody = $("tbody");
 const chkSettlements = $("chkSettlements");
 const selCurrencyDisplay = $("selCurrencyDisplay");
 const selPaidFilter = $("selPaidFilter");
+const selTypeFilter = $("selTypeFilter");
 const btnColumns = $("btnColumns");
 const columnsPanel = $("columnsPanel");
 
@@ -107,6 +108,23 @@ function fmt(n, currency = currentCurrency) {
   }
 }
 
+function supplierCostLbpToDisplay(costLbp) {
+  const value = Number(costLbp || 0);
+  if (currentCurrency === "USD") {
+    return (value / usdToLbpRate).toFixed(2);
+  }
+  return String(Math.round(value));
+}
+
+function supplierCostDisplayToLbp(displayValue) {
+  const raw = Number(displayValue || 0);
+  if (!Number.isFinite(raw)) return 0;
+  if (currentCurrency === "USD") {
+    return Math.round(raw * usdToLbpRate);
+  }
+  return Math.round(raw);
+}
+
 function setError(e) {
   err.textContent = e ? String(e) : "";
 }
@@ -170,9 +188,20 @@ function calculateTotalsFromRows(rows, includeSettlements) {
 
 function getFilteredRows(rows) {
   const paidFilter = selPaidFilter.value || "all";
-  if (paidFilter === "paid") return rows.filter((r) => !!r.supplier_paid);
-  if (paidFilter === "unpaid") return rows.filter((r) => !r.supplier_paid);
-  return rows;
+  const typeFilter = selTypeFilter?.value || "all";
+  return rows.filter((r) => {
+    if (paidFilter === "paid" && !r.supplier_paid) return false;
+    if (paidFilter === "unpaid" && r.supplier_paid) return false;
+
+    if (typeFilter === "all") return true;
+    if (typeFilter === "missing") return !!r.has_missing_types;
+
+    const presentTypes = String(r.transaction_types || "")
+      .split(",")
+      .map((x) => x.trim())
+      .filter(Boolean);
+    return presentTypes.includes(typeFilter);
+  });
 }
 
 function renderRows(rows) {
@@ -194,7 +223,15 @@ function renderRows(rows) {
       <td class="num" data-col="merchant_payout">${fmt(r.merchant_payout)}</td>
       <td class="num" data-col="toters_margin">${fmt(r.toters_margin)}</td>
       <td class="num" data-col="supplier_cost">
-        <input class="inp" data-order="${r.order_code}" data-kind="cost" value="${r.supplier_cost || 0}" />
+        <input
+          class="inp"
+          type="number"
+          step="${currentCurrency === "USD" ? "0.01" : "1"}"
+          min="0"
+          data-order="${r.order_code}"
+          data-kind="cost"
+          value="${supplierCostLbpToDisplay(r.supplier_cost)}"
+        />
       </td>
       <td data-col="paid">
         <input type="checkbox" data-order="${r.order_code}" data-kind="paid" ${r.supplier_paid ? "checked" : ""} />
@@ -218,7 +255,7 @@ function renderRows(rows) {
   tbody.querySelectorAll("input[data-kind='cost']").forEach((inp) => {
     inp.addEventListener("change", async (e) => {
       const order_code = e.target.getAttribute("data-order");
-      const supplier_cost = Number(e.target.value || 0);
+      const supplier_cost = supplierCostDisplayToLbp(e.target.value);
       const paidEl = tbody.querySelector(`input[data-kind='paid'][data-order='${order_code}']`);
       const supplier_paid = paidEl ? paidEl.checked : false;
 
@@ -232,7 +269,7 @@ function renderRows(rows) {
       const order_code = e.target.getAttribute("data-order");
       const paid = e.target.checked;
       const costEl = tbody.querySelector(`input[data-kind='cost'][data-order='${order_code}']`);
-      const supplier_cost = costEl ? Number(costEl.value || 0) : 0;
+      const supplier_cost = costEl ? supplierCostDisplayToLbp(costEl.value) : 0;
 
       await window.api.ordersUpsertMeta({ order_code, supplier_cost, supplier_paid: paid });
       await refresh();
@@ -388,6 +425,12 @@ selCurrencyDisplay.addEventListener("change", () => {
 });
 
 selPaidFilter.addEventListener("change", () => {
+  currentRowsView = getFilteredRows(allRowsCache);
+  renderRows(currentRowsView);
+  setStats(calculateTotalsFromRows(currentRowsView, chkSettlements.checked));
+});
+
+selTypeFilter?.addEventListener("change", () => {
   currentRowsView = getFilteredRows(allRowsCache);
   renderRows(currentRowsView);
   setStats(calculateTotalsFromRows(currentRowsView, chkSettlements.checked));

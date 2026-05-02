@@ -618,3 +618,7 @@ ipcMain.handle("db:getTable", (_evt, { table, limit }) => {
 ipcMain.handle("db:clearTable", (_evt, table) => {
   return adminDb.clearTable(table);
 });
+
+ipcMain.handle("db:listTables", () => {
+  return adminDb.listTables();
+});

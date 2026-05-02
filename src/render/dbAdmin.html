@@ -7,14 +7,37 @@
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 16px; }
     h2 { margin: 0 0 8px; font-size: 16px; }
     .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:12px; }
-    select, button { padding: 6px 10px; border-radius: 8px; border:1px solid #ddd; font-size:12px; }
+    select, button, input { padding: 6px 10px; border-radius: 8px; border:1px solid #ddd; font-size:12px; }
     button.danger { background:#b00020; color:#fff; border-color:#b00020; }
     button.secondary { background:#eee; }
     .muted { font-size:12px; color:#666; margin-top:4px; }
-    table { width:100%; border-collapse:collapse; font-size:12px; table-layout:fixed; }
-    th, td { padding:6px 8px; border-bottom:1px solid #eee; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    table { width:max-content; min-width:100%; border-collapse:collapse; font-size:12px; table-layout:auto; }
+    th, td { padding:6px 10px; border-bottom:1px solid #eee; white-space:nowrap; min-width:140px; }
     th { background:#fafafa; position:sticky; top:0; z-index:1; }
     .wrap { max-height:600px; overflow:auto; border:1px solid #eee; border-radius:10px; }
+    .columns-panel {
+      display: none;
+      position: absolute;
+      right: 16px;
+      top: 120px;
+      z-index: 20;
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+      padding: 10px;
+      min-width: 240px;
+      max-height: 360px;
+      overflow: auto;
+    }
+    .columns-panel.open { display: block; }
+    .columns-panel label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      margin: 6px 0;
+    }
   </style>
 </head>
 <body>
@@ -22,17 +45,17 @@
   <div class="row">
     <label>
       Table
-      <select id="selTable">
-        <option value="transactions">transactions</option>
-        <option value="order_meta">order_meta</option>
-        <option value="products">products</option>
-        <option value="sales">sales</option>
-        <option value="config">config</option>
-      </select>
+      <select id="selTable"></select>
+    </label>
+    <label>
+      Search
+      <input id="inpSearch" type="text" placeholder="Filter current table rows" />
     </label>
     <button id="btnReload" class="secondary">Reload</button>
+    <button id="btnColumns" class="secondary">Columns</button>
     <button id="btnClear" class="danger">Delete all rows in table</button>
   </div>
+  <div id="columnsPanel" class="columns-panel"></div>
 
   <div id="info" class="muted"></div>
 
@@ -50,30 +73,95 @@
     const info = $("info");
     const thead = $("thead");
     const tbody = $("tbody");
+    const inpSearch = $("inpSearch");
+    const btnColumns = $("btnColumns");
+    const columnsPanel = $("columnsPanel");
+    let allRows = [];
+    let tableColumns = [];
+    let visibleColumns = [];
+
+    function renderColumnsPanel() {
+      columnsPanel.innerHTML = tableColumns
+        .map((col) => {
+          const checked = visibleColumns.includes(col) ? "checked" : "";
+          return `<label><input type="checkbox" data-col-check="${col}" ${checked} /> ${col}</label>`;
+        })
+        .join("");
+
+      columnsPanel.querySelectorAll("input[data-col-check]").forEach((chk) => {
+        chk.addEventListener("change", () => {
+          const next = Array.from(columnsPanel.querySelectorAll("input[data-col-check]"))
+            .filter((x) => x.checked)
+            .map((x) => x.getAttribute("data-col-check"));
+          if (!next.length) {
+            chk.checked = true;
+            return;
+          }
+          visibleColumns = next;
+          renderRows();
+        });
+      });
+    }
+
+    function rowMatchesSearch(row, query) {
+      if (!query) return true;
+      const q = query.toLowerCase();
+      return visibleColumns.some((col) => String(row[col] ?? "").toLowerCase().includes(q));
+    }
+
+    function renderRows() {
+      const query = inpSearch.value.trim();
+      const visibleRows = allRows.filter((r) => rowMatchesSearch(r, query));
+
+      if (!tableColumns.length) {
+        thead.innerHTML = "";
+        tbody.innerHTML = "";
+        info.textContent = selTable.value + ": 0 rows (showing max 200)";
+        return;
+      }
+
+      thead.innerHTML = "<tr>" + visibleColumns.map(c => "<th>" + c + "</th>").join("") + "</tr>";
+      tbody.innerHTML = visibleRows.map(r => {
+        return "<tr>" + visibleColumns.map(c => "<td>" + String(r[c] ?? "") + "</td>").join("") + "</tr>";
+      }).join("");
+
+      const suffix = query ? ` | Filtered: ${visibleRows.length}` : "";
+      info.textContent = `${selTable.value}: ${allRows.length} rows (showing max 200)${suffix}`;
+    }
+
+    async function loadTables() {
+      const tables = await window.api.dbListTables();
+      const current = selTable.value;
+      selTable.innerHTML = (tables || [])
+        .map((t) => `<option value="${t}">${t}</option>`)
+        .join("");
+      if (!tables || !tables.length) {
+        throw new Error("No tables found");
+      }
+      selTable.value = tables.includes(current) ? current : tables[0];
+    }
 
     async function loadTable() {
       const table = selTable.value;
       info.textContent = "Loading " + table + "…";
       thead.innerHTML = "";
       tbody.innerHTML = "";
+      allRows = [];
+      tableColumns = [];
 
       try {
         const rows = await window.api.dbGetTable(table, 200);
+        allRows = rows || [];
 
-        if (!rows || !rows.length) {
+        if (!allRows.length) {
           info.textContent = table + ": 0 rows (showing max 200)";
           return;
         }
 
-        const cols = Object.keys(rows[0]);
-
-        thead.innerHTML = "<tr>" + cols.map(c => "<th>" + c + "</th>").join("") + "</tr>";
-
-        tbody.innerHTML = rows.map(r => {
-          return "<tr>" + cols.map(c => "<td>" + String(r[c] ?? "") + "</td>").join("") + "</tr>";
-        }).join("");
-
-        info.textContent = table + ": " + rows.length + " rows (showing max 200)";
+        tableColumns = Object.keys(allRows[0]);
+        visibleColumns = [...tableColumns];
+        renderColumnsPanel();
+        renderRows();
       } catch (e) {
         info.textContent = "Error: " + String(e);
       }
@@ -94,8 +182,24 @@
     });
 
     selTable.addEventListener("change", loadTable);
+    inpSearch.addEventListener("input", renderRows);
+    btnColumns.addEventListener("click", () => {
+      columnsPanel.classList.toggle("open");
+    });
+    document.addEventListener("click", (e) => {
+      if (!columnsPanel.classList.contains("open")) return;
+      if (columnsPanel.contains(e.target) || e.target === btnColumns) return;
+      columnsPanel.classList.remove("open");
+    });
 
-    loadTable();
+    (async () => {
+      try {
+        await loadTables();
+        await loadTable();
+      } catch (e) {
+        info.textContent = "Error: " + String(e);
+      }
+    })();
   </script>
 </body>
 </html>

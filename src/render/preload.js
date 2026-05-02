@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld("api", {
 
   // DB admin
   openDbAdmin: () => ipcRenderer.invoke("open-db-admin"),
+  dbListTables: () => ipcRenderer.invoke("db:listTables"),
   dbGetTable: (table, limit) => ipcRenderer.invoke("db:getTable", { table, limit }),
   dbClearTable: (table) => ipcRenderer.invoke("db:clearTable", table),
 });

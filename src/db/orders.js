@@ -40,10 +40,12 @@ function computeOrders() {
         incentive: 0,
         row_count: 0,
         dates: new Set(),
+        types: new Set(),
       });
     }
 
     const agg = byOrder.get(oc);
+    agg.types.add(ntype);
 
     agg.row_count += 1;
     if (r.created_at) agg.dates.add(r.created_at);
@@ -70,6 +72,9 @@ function computeOrders() {
     const net_profit = merchant_payout - (meta.supplier_cost || 0);
 
     const datesArr = Array.from(agg.dates);
+    const typeList = Array.from(agg.types).filter((t) => t !== "other");
+    const expectedTypes = ["gross", "service_fee", "vat"];
+    const missingTypes = expectedTypes.filter((t) => !agg.types.has(t));
     orders.push({
       order_code: agg.order_code,
       gross: agg.gross,
@@ -83,6 +88,9 @@ function computeOrders() {
       net_profit,
       row_count: agg.row_count,
       dates: datesArr.slice(0, 6).join(" | ") + (datesArr.length > 6 ? " ..." : ""),
+      transaction_types: typeList.join(","),
+      missing_types: missingTypes.join(","),
+      has_missing_types: missingTypes.length > 0 ? 1 : 0,
     });
   }
 

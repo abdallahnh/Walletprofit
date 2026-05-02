@@ -1,9 +1,32 @@
 const { getDb } = require("./database");
 
-const ALLOWED_TABLES = ["transactions", "order_meta", "products", "sales", "config"];
+function isSafeTableName(name) {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(String(name || ""));
+}
+
+function listTables() {
+  const db = getDb();
+  return db
+    .prepare(
+      `
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'table'
+        AND name NOT LIKE 'sqlite_%'
+      ORDER BY name
+    `
+    )
+    .all()
+    .map((r) => r.name)
+    .filter((name) => isSafeTableName(name));
+}
 
 function assertTable(table) {
-  if (!ALLOWED_TABLES.includes(table)) {
+  if (!isSafeTableName(table)) {
+    throw new Error(`Unsupported table: ${table}`);
+  }
+  const existingTables = listTables();
+  if (!existingTables.includes(table)) {
     throw new Error(`Unsupported table: ${table}`);
   }
 }
@@ -28,8 +51,8 @@ function clearTable(table) {
 }
 
 module.exports = {
+  listTables,
   getTableRows,
   clearTable,
-  ALLOWED_TABLES,
 };
 

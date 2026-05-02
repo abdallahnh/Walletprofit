@@ -146,6 +146,8 @@ td.input-cell {
 <div class="muted">Manage product prices, costs, and stock levels</div>
 
 <div class="row">
+  <input id="inpSearch" type="text" class="inp" style="max-width:300px" placeholder="Search barcode, name, category..." />
+
   <button id="btnImportProducts" class="primary">
     Import Products Excel
   </button>
@@ -168,6 +170,7 @@ td.input-cell {
   <th style="width:120px">Barcode</th>
   <th>Product Name</th>
   <th style="width:100px">Category</th>
+  <th style="width:180px">Image URL</th>
   <th class="num" style="width:110px">Price (USD)</th>
   <th class="num" style="width:110px">Cost (USD)</th>
   <th class="num" style="width:90px">Stock</th>
@@ -181,10 +184,30 @@ td.input-cell {
 <script>
 
 let products = [];
+let filteredProducts = [];
+
+function getSearchQuery() {
+  return (document.getElementById("inpSearch").value || "").trim().toLowerCase();
+}
+
+function applyProductFilter() {
+  const q = getSearchQuery();
+  if (!q) {
+    filteredProducts = [...products];
+    return;
+  }
+  filteredProducts = products.filter((p) =>
+    String(p.barcode || "").toLowerCase().includes(q) ||
+    String(p.item_name || "").toLowerCase().includes(q) ||
+    String(p.category || "").toLowerCase().includes(q) ||
+    String(p.brand || "").toLowerCase().includes(q)
+  );
+}
 
 async function loadProducts(){
   try {
     products = await window.api.productsGet();
+    applyProductFilter();
     renderProducts();
   } catch (e) {
     showMessage('Error loading products: ' + e.message, 'error');
@@ -195,7 +218,7 @@ function renderProducts(){
   const tbody = document.getElementById("tbody");
   tbody.innerHTML = "";
 
-  products.forEach(p => {
+  filteredProducts.forEach(p => {
     const tr = document.createElement("tr");
     tr.dataset.barcode = p.barcode;
 
@@ -205,6 +228,11 @@ function renderProducts(){
       <td>${p.barcode}</td>
       <td>${p.item_name}</td>
       <td>${p.category || ""}</td>
+      <td title="${p.image_url || ""}">
+        ${p.image_url
+          ? `<a href="${p.image_url}" target="_blank" rel="noopener noreferrer">Open image</a>`
+          : ""}
+      </td>
       <td class="num input-cell">
         <input type="number" step="0.01" class="inp price-input"
                value="${(p.unit_price_usd != null ? p.unit_price_usd : 0).toFixed(2)}"
@@ -303,6 +331,10 @@ function showMessage(text, type) {
 }
 
 document.getElementById("btnReload").addEventListener("click", loadProducts);
+document.getElementById("inpSearch").addEventListener("input", () => {
+  applyProductFilter();
+  renderProducts();
+});
 
 document.getElementById("btnImportProducts").addEventListener("click", async() => {
   try {
