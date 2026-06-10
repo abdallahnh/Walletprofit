@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Suppliers</title>
+<style>
+body {
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  margin: 16px;
+  background: #fff;
+}
+h1 { font-size: 18px; margin: 0 0 8px; }
+.muted { color: #666; font-size: 12px; margin-bottom: 12px; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0; align-items: center; }
+button {
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.primary { background: #111; color: #fff; }
+.secondary { background: #eee; }
+.danger { background: #dc3545; color: #fff; }
+.inp {
+  padding: 8px 10px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 12px;
+  min-width: 200px;
+}
+.wrap {
+  overflow: auto;
+  max-height: calc(100vh - 180px);
+  border: 1px solid #eee;
+  border-radius: 12px;
+}
+table { width: 100%; border-collapse: collapse; }
+th, td {
+  border-bottom: 1px solid #e6e6e6;
+  padding: 10px 8px;
+  font-size: 12px;
+  text-align: left;
+}
+th { position: sticky; top: 0; background: #fafafa; }
+.error { color: #b00020; font-size: 12px; margin: 8px 0; }
+.msg { color: #155724; font-size: 12px; margin: 8px 0; }
+</style>
+</head>
+<body>
+  <h1>Suppliers</h1>
+  <p class="muted">Manage suppliers here. They appear in the wallet transactions dropdown.</p>
+
+  <div class="row">
+    <input type="text" id="inpNewSupplier" class="inp" placeholder="New supplier name" />
+    <button class="primary" id="btnAdd">Add Supplier</button>
+    <button class="secondary" id="btnRefresh">Refresh</button>
+  </div>
+
+  <div id="err" class="error"></div>
+  <div id="msg" class="msg"></div>
+
+  <div class="wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Created</th>
+          <th style="width: 160px;">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <script>
+    const tbody = document.getElementById("tbody");
+    const inpNew = document.getElementById("inpNewSupplier");
+    const errEl = document.getElementById("err");
+    const msgEl = document.getElementById("msg");
+
+    function setErr(e) { errEl.textContent = e ? String(e) : ""; }
+    function setMsg(m) { msgEl.textContent = m ? String(m) : ""; }
+
+    function escapeHtml(str) {
+      return String(str || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    async function load() {
+      setErr("");
+      const rows = await window.api.suppliersGetAll();
+      tbody.innerHTML = rows.map((s) => `
+        <tr data-id="${s.id}">
+          <td>
+            <input class="inp" type="text" data-edit-name value="${escapeHtml(s.name)}" style="min-width: 0; width: 100%;" />
+          </td>
+          <td>${escapeHtml((s.created_at || "").slice(0, 10))}</td>
+          <td>
+            <button class="secondary" data-save>Save</button>
+            <button class="danger" data-delete>Delete</button>
+          </td>
+        </tr>
+      `).join("");
+
+      tbody.querySelectorAll("[data-save]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const tr = btn.closest("tr");
+          const id = Number(tr.getAttribute("data-id"));
+          const name = tr.querySelector("[data-edit-name]").value.trim();
+          if (!name) { setErr("Name cannot be empty"); return; }
+          const res = await window.api.suppliersRename(id, name);
+          if (res?.ok === false) { setErr(res.error); return; }
+          setMsg("Supplier updated.");
+          await load();
+        });
+      });
+
+      tbody.querySelectorAll("[data-delete]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const tr = btn.closest("tr");
+          const id = Number(tr.getAttribute("data-id"));
+          const name = tr.querySelector("[data-edit-name]").value;
+          if (!confirm(`Delete supplier "${name}"? Orders using it will become unassigned.`)) return;
+          await window.api.suppliersDelete(id);
+          setMsg("Supplier deleted.");
+          await load();
+        });
+      });
+    }
+
+    document.getElementById("btnAdd").addEventListener("click", async () => {
+      setErr("");
+      setMsg("");
+      const name = inpNew.value.trim();
+      if (!name) { setErr("Enter a supplier name"); return; }
+      const res = await window.api.suppliersCreate(name);
+      if (res?.ok === false) { setErr(res.error); return; }
+      inpNew.value = "";
+      setMsg(`Supplier "${name}" added.`);
+      await load();
+    });
+
+    inpNew.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") document.getElementById("btnAdd").click();
+    });
+
+    document.getElementById("btnRefresh").addEventListener("click", () => load().catch(setErr));
+
+    load().catch(setErr);
+  </script>
+</body>
+</html>
