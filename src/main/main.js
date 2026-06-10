@@ -9,6 +9,7 @@ const ordersDb = require("../db/orders");
 const productsDb = require("../db/products");
 const salesDb = require("../db/sales");
 const adminDb = require("../db/admin");
+const suppliersDb = require("../db/suppliers");
 
 const logger = require("../utils/logger");
 
@@ -160,8 +161,8 @@ ipcMain.handle("totals:get", async (_evt, opts) => {
 });
 
 ipcMain.handle("orderMeta:set", async (_evt, payload) => {
-  const res = ordersDb.upsertOrderMeta(payload);
-  if (!res?.ok) return res;
+  const res = ordersDb.upsertOrderMeta(payload || {});
+  if (res?.ok === false) return res;
 
   try {
     const cfg = walletDb.getWalletConfig();
@@ -185,17 +186,91 @@ ipcMain.handle("export:csv", async () => {
   return ordersDb.exportOrdersCsv();
 });
 
+ipcMain.handle("suppliers:getAll", async () => {
+  return suppliersDb.getAllSuppliers();
+});
+
+ipcMain.handle("suppliers:create", async (_evt, name) => {
+  return suppliersDb.createSupplier(name);
+});
+
+ipcMain.handle("suppliers:rename", async (_evt, { id, name }) => {
+  return suppliersDb.renameSupplier(id, name);
+});
+
+ipcMain.handle("suppliers:delete", async (_evt, id) => {
+  return suppliersDb.deleteSupplier(id);
+});
+
+ipcMain.handle("suppliers:getSummary", async (_evt, opts) => {
+  return ordersDb.getSupplierSummary(opts || {});
+});
+
+ipcMain.handle("open-suppliers", () => {
+  const { preloadJs } = resolveRendererPaths();
+
+  const suppliersPath = path.join(app.getAppPath(), "src", "render", "suppliers.html");
+
+  const win = new BrowserWindow({
+    width: 700,
+    height: 600,
+    webPreferences: {
+      preload: preloadJs,
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  win.loadFile(suppliersPath);
+});
+
 ipcMain.handle("backup:export", async () => {
-  return walletDb.exportBackupJson();
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    title: "Export Data",
+    defaultPath: (() => {
+      const now = new Date();
+      const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      return `wallet-profit-backup-${stamp}.db`;
+    })(),
+    filters: [
+      { name: "SQLite Database", extensions: ["db", "sqlite"] },
+      { name: "JSON Backup", extensions: ["json"] },
+    ],
+  });
+
+  if (canceled || !filePath) return { ok: false, canceled: true };
+
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === ".json") {
+    const outPath = walletDb.exportBackupJson(filePath);
+    return { ok: true, path: outPath, format: "json" };
+  }
+
+  const outPath = await walletDb.exportSqliteBackup(filePath);
+  return { ok: true, path: outPath, format: "sqlite" };
 });
 
 ipcMain.handle("backup:import", async () => {
   const res = await dialog.showOpenDialog({
     properties: ["openFile"],
-    filters: [{ name: "JSON", extensions: ["json"] }],
+    filters: [
+      { name: "Backup Files", extensions: ["db", "sqlite", "json"] },
+    ],
   });
-  if (res.canceled || !res.filePaths?.length) return { ok: false, error: "Canceled" };
-  return walletDb.importBackupJsonFromFile(res.filePaths[0]);
+  if (res.canceled || !res.filePaths?.length) return { ok: false, canceled: true };
+
+  const filePath = res.filePaths[0];
+  const format = walletDb.detectBackupFormat(filePath);
+
+  if (!format) {
+    return { ok: false, error: "Unsupported backup file format. Use .db, .sqlite, or .json" };
+  }
+
+  if (format === "sqlite") {
+    return walletDb.importSqliteBackupFromFile(filePath);
+  }
+
+  return walletDb.importBackupJsonFromFile(filePath, { replace: true });
 });
 
 ipcMain.handle("open-order", async (_, orderCode) => {

@@ -38,6 +38,31 @@
       font-size: 12px;
       margin: 6px 0;
     }
+    .supplier-panel {
+      display: none;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      padding: 10px 12px;
+      margin-bottom: 12px;
+      background: #f8f9fa;
+      border: 1px solid #dee2e6;
+      border-radius: 10px;
+    }
+    .supplier-panel.open { display: flex; }
+    .supplier-panel input { min-width: 220px; }
+    .msg-ok { color: #155724; font-size: 12px; }
+    .msg-err { color: #b00020; font-size: 12px; }
+    td input.supplier-name {
+      width: 100%;
+      min-width: 160px;
+      padding: 4px 8px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 12px;
+    }
+    .actions { display: flex; gap: 6px; }
+    .actions button { padding: 4px 8px; font-size: 11px; }
   </style>
 </head>
 <body>
@@ -56,6 +81,16 @@
     <button id="btnClear" class="danger">Delete all rows in table</button>
   </div>
   <div id="columnsPanel" class="columns-panel"></div>
+
+  <div id="supplierPanel" class="supplier-panel row">
+    <strong>Suppliers</strong>
+    <label>
+      Name
+      <input id="inpSupplierName" type="text" placeholder="Supplier name" />
+    </label>
+    <button id="btnAddSupplier">Add Supplier</button>
+    <span id="supplierMsg"></span>
+  </div>
 
   <div id="info" class="muted"></div>
 
@@ -76,9 +111,32 @@
     const inpSearch = $("inpSearch");
     const btnColumns = $("btnColumns");
     const columnsPanel = $("columnsPanel");
+    const supplierPanel = $("supplierPanel");
+    const inpSupplierName = $("inpSupplierName");
+    const btnAddSupplier = $("btnAddSupplier");
+    const supplierMsg = $("supplierMsg");
     let allRows = [];
     let tableColumns = [];
     let visibleColumns = [];
+
+    function escapeHtml(str) {
+      return String(str ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function setSupplierMsg(text, isError) {
+      supplierMsg.textContent = text || "";
+      supplierMsg.className = isError ? "msg-err" : "msg-ok";
+    }
+
+    function updateSupplierPanel() {
+      const isSuppliers = selTable.value === "suppliers";
+      supplierPanel.classList.toggle("open", isSuppliers);
+      if (!isSuppliers) setSupplierMsg("");
+    }
 
     function renderColumnsPanel() {
       columnsPanel.innerHTML = tableColumns
@@ -109,7 +167,72 @@
       return visibleColumns.some((col) => String(row[col] ?? "").toLowerCase().includes(q));
     }
 
+    function wireSupplierRowActions() {
+      tbody.querySelectorAll("[data-save-supplier]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const tr = btn.closest("tr");
+          const id = Number(tr.getAttribute("data-id"));
+          const name = tr.querySelector(".supplier-name").value.trim();
+          if (!name) {
+            setSupplierMsg("Supplier name cannot be empty", true);
+            return;
+          }
+          const res = await window.api.suppliersRename(id, name);
+          if (res?.ok === false) {
+            setSupplierMsg(res.error || "Failed to update supplier", true);
+            return;
+          }
+          setSupplierMsg("Supplier updated.");
+          await loadTable();
+        });
+      });
+
+      tbody.querySelectorAll("[data-delete-supplier]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const tr = btn.closest("tr");
+          const id = Number(tr.getAttribute("data-id"));
+          const name = tr.querySelector(".supplier-name").value;
+          if (!confirm(`Delete supplier "${name}"?\nOrders using it will become unassigned.`)) return;
+          await window.api.suppliersDelete(id);
+          setSupplierMsg("Supplier deleted.");
+          await loadTable();
+        });
+      });
+    }
+
+    function renderSupplierRows() {
+      const query = inpSearch.value.trim().toLowerCase();
+      const visibleRows = allRows.filter((r) => {
+        if (!query) return true;
+        return String(r.name ?? "").toLowerCase().includes(query)
+          || String(r.id ?? "").includes(query);
+      });
+
+      thead.innerHTML = "<tr><th>id</th><th>name</th><th>created_at</th><th>Actions</th></tr>";
+      tbody.innerHTML = visibleRows.map((r) => `
+        <tr data-id="${r.id}">
+          <td>${r.id}</td>
+          <td><input class="supplier-name" type="text" value="${escapeHtml(r.name)}" /></td>
+          <td>${escapeHtml(r.created_at)}</td>
+          <td class="actions">
+            <button data-save-supplier>Save</button>
+            <button data-delete-supplier class="danger">Delete</button>
+          </td>
+        </tr>
+      `).join("");
+
+      wireSupplierRowActions();
+
+      const suffix = query ? ` | Filtered: ${visibleRows.length}` : "";
+      info.textContent = `suppliers: ${allRows.length} rows (showing max 200)${suffix}`;
+    }
+
     function renderRows() {
+      if (selTable.value === "suppliers") {
+        renderSupplierRows();
+        return;
+      }
+
       const query = inpSearch.value.trim();
       const visibleRows = allRows.filter((r) => rowMatchesSearch(r, query));
 
@@ -143,6 +266,7 @@
 
     async function loadTable() {
       const table = selTable.value;
+      updateSupplierPanel();
       info.textContent = "Loading " + table + "…";
       thead.innerHTML = "";
       tbody.innerHTML = "";
@@ -152,6 +276,11 @@
       try {
         const rows = await window.api.dbGetTable(table, 200);
         allRows = rows || [];
+
+        if (table === "suppliers") {
+          renderSupplierRows();
+          return;
+        }
 
         if (!allRows.length) {
           info.textContent = table + ": 0 rows (showing max 200)";
@@ -179,6 +308,26 @@
       } catch (e) {
         info.textContent = "Error: " + String(e);
       }
+    });
+
+    btnAddSupplier.addEventListener("click", async () => {
+      const name = inpSupplierName.value.trim();
+      if (!name) {
+        setSupplierMsg("Enter a supplier name", true);
+        return;
+      }
+      const res = await window.api.suppliersCreate(name);
+      if (res?.ok === false) {
+        setSupplierMsg(res.error || "Failed to add supplier", true);
+        return;
+      }
+      inpSupplierName.value = "";
+      setSupplierMsg(`Supplier "${name}" added.`);
+      await loadTable();
+    });
+
+    inpSupplierName.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") btnAddSupplier.click();
     });
 
     selTable.addEventListener("change", loadTable);

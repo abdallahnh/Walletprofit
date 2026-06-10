@@ -210,12 +210,11 @@ function recordOrderItemsToSales(order) {
   };
 }
 
-function getSalesReport(opts = {}) {
-  const db = getDb();
-  const { from, to } = opts;
-
+function buildSalesFilter(opts = {}) {
+  const { from, to, supplierIds } = opts;
   const params = [];
   const where = [];
+  let joinSql = "";
 
   if (from && to) {
     where.push("datetime(s.created_at) BETWEEN datetime(?) AND datetime(?)");
@@ -228,7 +227,23 @@ function getSalesReport(opts = {}) {
     params.push(to);
   }
 
+  const ids = Array.isArray(supplierIds)
+    ? supplierIds.map(Number).filter((id) => id > 0)
+    : [];
+
+  if (ids.length > 0) {
+    joinSql = "LEFT JOIN order_meta om ON om.order_code = s.order_code";
+    where.push(`om.supplier_id IN (${ids.map(() => "?").join(", ")})`);
+    params.push(...ids);
+  }
+
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  return { joinSql, whereSql, params };
+}
+
+function getSalesReport(opts = {}) {
+  const db = getDb();
+  const { joinSql, whereSql, params } = buildSalesFilter(opts);
 
   const rows = db
     .prepare(
@@ -243,6 +258,7 @@ function getSalesReport(opts = {}) {
       SUM(s.profit) AS profit
     FROM sales s
     JOIN products p ON s.product_id = p.id
+    ${joinSql}
     ${whereSql}
     GROUP BY p.barcode, p.item_name, p.brand
     ORDER BY sold_qty DESC
@@ -263,7 +279,8 @@ function getSalesReport(opts = {}) {
 
 function getRevenueByPeriod(opts = {}) {
   const db = getDb();
-  const { from, to, period = 'day' } = opts;
+  const { period = 'day' } = opts;
+  const { joinSql, whereSql, params } = buildSalesFilter(opts);
 
   let dateFormat;
   switch (period) {
@@ -279,22 +296,6 @@ function getRevenueByPeriod(opts = {}) {
       break;
   }
 
-  const params = [];
-  const where = [];
-
-  if (from && to) {
-    where.push("datetime(s.created_at) BETWEEN datetime(?) AND datetime(?)");
-    params.push(from, to);
-  } else if (from) {
-    where.push("datetime(s.created_at) >= datetime(?)");
-    params.push(from);
-  } else if (to) {
-    where.push("datetime(s.created_at) <= datetime(?)");
-    params.push(to);
-  }
-
-  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
-
   const rows = db
     .prepare(
       `
@@ -306,6 +307,7 @@ function getRevenueByPeriod(opts = {}) {
       SUM(s.quantity) AS quantity_sold,
       COUNT(DISTINCT s.order_code) AS order_count
     FROM sales s
+    ${joinSql}
     ${whereSql}
     GROUP BY ${dateFormat}
     ORDER BY ${dateFormat}
@@ -325,23 +327,8 @@ function getRevenueByPeriod(opts = {}) {
 
 function getTopProductsByRevenue(opts = {}) {
   const db = getDb();
-  const { from, to, limit = 10 } = opts;
-
-  const params = [];
-  const where = [];
-
-  if (from && to) {
-    where.push("datetime(s.created_at) BETWEEN datetime(?) AND datetime(?)");
-    params.push(from, to);
-  } else if (from) {
-    where.push("datetime(s.created_at) >= datetime(?)");
-    params.push(from);
-  } else if (to) {
-    where.push("datetime(s.created_at) <= datetime(?)");
-    params.push(to);
-  }
-
-  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const { limit = 10 } = opts;
+  const { joinSql, whereSql, params } = buildSalesFilter(opts);
 
   const rows = db
     .prepare(
@@ -356,6 +343,7 @@ function getTopProductsByRevenue(opts = {}) {
       SUM(s.profit) AS profit
     FROM sales s
     JOIN products p ON s.product_id = p.id
+    ${joinSql}
     ${whereSql}
     GROUP BY p.barcode, p.item_name, p.brand
     ORDER BY revenue DESC
@@ -377,23 +365,8 @@ function getTopProductsByRevenue(opts = {}) {
 
 function getTopProductsByProfit(opts = {}) {
   const db = getDb();
-  const { from, to, limit = 10 } = opts;
-
-  const params = [];
-  const where = [];
-
-  if (from && to) {
-    where.push("datetime(s.created_at) BETWEEN datetime(?) AND datetime(?)");
-    params.push(from, to);
-  } else if (from) {
-    where.push("datetime(s.created_at) >= datetime(?)");
-    params.push(from);
-  } else if (to) {
-    where.push("datetime(s.created_at) <= datetime(?)");
-    params.push(to);
-  }
-
-  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const { limit = 10 } = opts;
+  const { joinSql, whereSql, params } = buildSalesFilter(opts);
 
   const rows = db
     .prepare(
@@ -408,6 +381,7 @@ function getTopProductsByProfit(opts = {}) {
       SUM(s.profit) AS profit
     FROM sales s
     JOIN products p ON s.product_id = p.id
+    ${joinSql}
     ${whereSql}
     GROUP BY p.barcode, p.item_name, p.brand
     ORDER BY profit DESC
@@ -429,23 +403,8 @@ function getTopProductsByProfit(opts = {}) {
 
 function getProfitMarginAnalysis(opts = {}) {
   const db = getDb();
-  const { from, to, limit = 20 } = opts;
-
-  const params = [];
-  const where = [];
-
-  if (from && to) {
-    where.push("datetime(s.created_at) BETWEEN datetime(?) AND datetime(?)");
-    params.push(from, to);
-  } else if (from) {
-    where.push("datetime(s.created_at) >= datetime(?)");
-    params.push(from);
-  } else if (to) {
-    where.push("datetime(s.created_at) <= datetime(?)");
-    params.push(to);
-  }
-
-  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const { limit = 20 } = opts;
+  const { joinSql, whereSql, params } = buildSalesFilter(opts);
 
   const rows = db
     .prepare(
@@ -467,6 +426,7 @@ function getProfitMarginAnalysis(opts = {}) {
       END AS profit_margin_percent
     FROM sales s
     JOIN products p ON s.product_id = p.id
+    ${joinSql}
     ${whereSql}
     GROUP BY p.barcode, p.item_name, p.brand, p.unit_price_usd, p.cost_usd
     HAVING sold_qty > 0

@@ -153,6 +153,73 @@ td.num, th.num {
   font-size: 12px;
   margin: 6px 0;
 }
+
+.supplier-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+}
+.supplier-filter-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #495057;
+}
+.supplier-filter-control { position: relative; }
+.supplier-filter-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 30;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+  padding: 10px;
+  min-width: 200px;
+  max-height: 280px;
+  overflow-y: auto;
+  margin-top: 4px;
+}
+.supplier-filter-dropdown.hidden { display: none; }
+.supplier-filter-all,
+.supplier-filter-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  margin: 6px 0;
+  cursor: pointer;
+}
+.supplier-summary {
+  margin: 12px 0;
+  border: 1px solid #eee;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.supplier-summary h2 {
+  font-size: 14px;
+  margin: 0;
+  padding: 10px 12px;
+  background: #fafafa;
+  border-bottom: 1px solid #eee;
+}
+.supplier-summary table { width: 100%; }
+.supplier-summary th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+.supplier-summary th.sortable:hover { background: #f0f0f0; }
+th.sortable { cursor: pointer; user-select: none; }
+th.sortable:hover { background: #f0f0f0; }
+.sel-supplier {
+  width: 130px;
+  padding: 6px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 12px;
+  max-width: 100%;
+}
   </style>
 </head>
 <body>
@@ -209,6 +276,8 @@ td.num, th.num {
       <label>Data:</label>
       <button class="menu-btn" id="btnRefresh">Refresh</button>
       <button class="menu-btn" id="btnExportCsv">Export CSV</button>
+      <button class="menu-btn" id="btnExportData">Export Data</button>
+      <button class="menu-btn" id="btnImportData">Import Data</button>
     </div>
 
     <div class="menu-separator"></div>
@@ -236,6 +305,7 @@ td.num, th.num {
     <div class="menu-group">
       <label>Views:</label>
       <button class="menu-btn" id="btnProducts">Products</button>
+      <button class="menu-btn" id="btnSuppliers">Suppliers</button>
       <button class="menu-btn" id="btnRevenueDashboard">Dashboard</button>
       <button class="menu-btn" id="btnDbAdmin">DB Admin</button>
     </div>
@@ -244,6 +314,7 @@ td.num, th.num {
 
     <div class="menu-group">
       <label>Options:</label>
+      <div id="supplierFilterContainer"></div>
       <label class="pill">
         <input type="checkbox" id="chkSettlements" />
         Include Settlements
@@ -276,12 +347,32 @@ td.num, th.num {
 
   <div class="stats" id="stats"></div>
 
+  <div class="supplier-summary" id="supplierSummarySection">
+    <h2>Supplier Summary</h2>
+    <div class="wrap" style="max-height: 220px;">
+      <table>
+        <thead>
+          <tr>
+            <th class="sortable" data-summary-sort="supplier_name">Supplier</th>
+            <th class="num sortable" data-summary-sort="orders">Orders</th>
+            <th class="num sortable" data-summary-sort="revenue">Revenue</th>
+            <th class="num sortable" data-summary-sort="supplier_cost">Supplier Cost</th>
+            <th class="num sortable" data-summary-sort="payable">Payable</th>
+            <th class="num sortable" data-summary-sort="profit">Profit</th>
+          </tr>
+        </thead>
+        <tbody id="supplierSummaryBody"></tbody>
+      </table>
+    </div>
+  </div>
+
   <div class="wrap">
     <table id="table">
       <thead>
         <tr>
           <th data-col="view"></th>
           <th data-col="order">Order</th>
+          <th class="sortable" data-col="supplier" data-sort="supplier_name">Supplier</th>
           <th class="num" data-col="gross">Gross</th>
           <th class="num" data-col="service">Service</th>
           <th class="num" data-col="vat">VAT</th>
@@ -299,6 +390,7 @@ td.num, th.num {
     </table>
   </div>
 
+  <script src="./supplierFilter.js"></script>
   <script src="./renderer.js"></script>
 </body>
 </html>

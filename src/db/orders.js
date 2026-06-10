@@ -2,6 +2,7 @@ const path = require("path");
 const fs = require("fs");
 const { getDb, getDbPath } = require("./database");
 const { normalizeType } = require("./wallet");
+const { getOrCreateSupplier } = require("./suppliers");
 
 function computeOrders() {
   const db = getDb();
@@ -56,12 +57,25 @@ function computeOrders() {
     else if (ntype === "incentive") agg.incentive += Math.abs(amt);
   }
 
-  const metas = db.prepare("SELECT order_code, supplier_cost, supplier_paid FROM order_meta").all();
+  const metas = db
+    .prepare(
+      `
+    SELECT om.order_code, om.supplier_cost, om.supplier_paid, om.supplier_id, s.name AS supplier_name
+    FROM order_meta om
+    LEFT JOIN suppliers s ON s.id = om.supplier_id
+  `
+    )
+    .all();
   const metaMap = new Map(metas.map((m) => [m.order_code, m]));
 
   const orders = [];
   for (const agg of byOrder.values()) {
-    const meta = metaMap.get(agg.order_code) || { supplier_cost: 0, supplier_paid: 0 };
+    const meta = metaMap.get(agg.order_code) || {
+      supplier_cost: 0,
+      supplier_paid: 0,
+      supplier_id: null,
+      supplier_name: "",
+    };
 
     const incentive = agg.incentive || 0;
 
@@ -71,7 +85,8 @@ function computeOrders() {
 
     const net_profit = merchant_payout - (meta.supplier_cost || 0);
 
-    const datesArr = Array.from(agg.dates);
+    const datesArr = Array.from(agg.dates).sort();
+    const primary_date = datesArr[0] || "";
     const typeList = Array.from(agg.types).filter((t) => t !== "other");
     const expectedTypes = ["gross", "service_fee", "vat"];
     const missingTypes = expectedTypes.filter((t) => !agg.types.has(t));
@@ -85,8 +100,11 @@ function computeOrders() {
       toters_margin,
       supplier_cost: meta.supplier_cost || 0,
       supplier_paid: meta.supplier_paid ? 1 : 0,
+      supplier_id: meta.supplier_id || null,
+      supplier_name: meta.supplier_name || "",
       net_profit,
       row_count: agg.row_count,
+      primary_date,
       dates: datesArr.slice(0, 6).join(" | ") + (datesArr.length > 6 ? " ..." : ""),
       transaction_types: typeList.join(","),
       missing_types: missingTypes.join(","),
@@ -94,7 +112,7 @@ function computeOrders() {
     });
   }
 
-  orders.sort((a, b) => a.order_code.localeCompare(b.created_at));
+  orders.sort((a, b) => a.order_code.localeCompare(b.order_code));
 
   return { orders, settlementsTotal };
 }
@@ -104,13 +122,64 @@ function getOrdersReconciliation() {
   return orders;
 }
 
+function getSupplierSummary(opts = {}) {
+  const supplierIds = Array.isArray(opts.supplierIds)
+    ? opts.supplierIds.map(Number).filter((id) => id > 0)
+    : null;
+  const { from, to } = opts;
+
+  const { orders } = computeOrders();
+
+  const bySupplier = new Map();
+
+  for (const o of orders) {
+    if (from && o.primary_date && o.primary_date < from) continue;
+    if (to && o.primary_date && o.primary_date > to) continue;
+
+    if (supplierIds && supplierIds.length > 0) {
+      if (!o.supplier_id || !supplierIds.includes(o.supplier_id)) continue;
+    }
+
+    const key = o.supplier_id || 0;
+    const name = o.supplier_name || "(Unassigned)";
+
+    if (!bySupplier.has(key)) {
+      bySupplier.set(key, {
+        supplier_id: o.supplier_id || null,
+        supplier_name: name,
+        orders: 0,
+        revenue: 0,
+        supplier_cost: 0,
+        payable: 0,
+        profit: 0,
+      });
+    }
+
+    const row = bySupplier.get(key);
+    row.orders += 1;
+    row.revenue += o.merchant_payout || 0;
+    row.supplier_cost += o.supplier_cost || 0;
+    if (!o.supplier_paid) {
+      row.payable += o.supplier_cost || 0;
+    }
+    row.profit += o.net_profit || 0;
+  }
+
+  return Array.from(bySupplier.values()).sort((a, b) =>
+    a.supplier_name.localeCompare(b.supplier_name)
+  );
+}
+
 function getTotals(opts = {}) {
   const includeSettlements = !!opts.includeSettlements;
+  const supplierIds = Array.isArray(opts.supplierIds)
+    ? opts.supplierIds.map(Number).filter((id) => id > 0)
+    : null;
 
   const { orders, settlementsTotal } = computeOrders();
 
   const totals = {
-    orders: orders.length,
+    orders: 0,
     gross: 0,
     service_fee: 0,
     vat: 0,
@@ -124,6 +193,11 @@ function getTotals(opts = {}) {
   };
 
   for (const o of orders) {
+    if (supplierIds && supplierIds.length > 0) {
+      if (!o.supplier_id || !supplierIds.includes(o.supplier_id)) continue;
+    }
+
+    totals.orders += 1;
     totals.gross += o.gross || 0;
     totals.service_fee += o.service_fee || 0;
     totals.vat += o.vat || 0;
@@ -138,22 +212,43 @@ function getTotals(opts = {}) {
   return totals;
 }
 
-function upsertOrderMeta({ order_code, supplier_cost, supplier_paid }) {
+function upsertOrderMeta({ order_code, supplier_cost, supplier_paid, supplier_name, supplier_id }) {
   if (!order_code) return { ok: false, error: "Missing order_code" };
+
+  const cost = Math.trunc(supplier_cost || 0);
+  const paid = supplier_paid ? 1 : 0;
+
+  let resolvedSupplierId = null;
+
+  if (supplier_name !== undefined && supplier_name !== null) {
+    const trimmed = String(supplier_name).trim();
+    if (trimmed) {
+      const supplier = getOrCreateSupplier(trimmed);
+      resolvedSupplierId = supplier?.id || null;
+    }
+  } else if (supplier_id !== undefined) {
+    resolvedSupplierId = supplier_id ? Number(supplier_id) || null : null;
+  }
+
+  if ((cost > 0 || paid) && !resolvedSupplierId) {
+    return { ok: false, error: "Supplier name is required when setting cost or paid status" };
+  }
+
   const db = getDb();
 
   db.prepare(
     `
-    INSERT INTO order_meta(order_code, supplier_cost, supplier_paid, updated_at)
-    VALUES(?, ?, ?, datetime('now'))
+    INSERT INTO order_meta(order_code, supplier_cost, supplier_paid, supplier_id, updated_at)
+    VALUES(?, ?, ?, ?, datetime('now'))
     ON CONFLICT(order_code) DO UPDATE SET
       supplier_cost=excluded.supplier_cost,
       supplier_paid=excluded.supplier_paid,
+      supplier_id=excluded.supplier_id,
       updated_at=datetime('now')
   `
-  ).run(order_code, Math.trunc(supplier_cost || 0), supplier_paid ? 1 : 0);
+  ).run(order_code, cost, paid, resolvedSupplierId);
 
-  return { ok: true };
+  return { ok: true, supplier_id: resolvedSupplierId };
 }
 
 function resetSupplierMeta() {
@@ -168,6 +263,7 @@ function exportOrdersCsv() {
 
   const header = [
     "order_code",
+    "supplier_name",
     "gross",
     "service_fee",
     "vat",
@@ -185,6 +281,7 @@ function exportOrdersCsv() {
   for (const o of orders) {
     const row = [
       o.order_code,
+      JSON.stringify(o.supplier_name || ""),
       o.gross,
       o.service_fee,
       o.vat,
@@ -208,9 +305,9 @@ function exportOrdersCsv() {
 module.exports = {
   computeOrders,
   getOrdersReconciliation,
+  getSupplierSummary,
   getTotals,
   upsertOrderMeta,
   resetSupplierMeta,
   exportOrdersCsv,
 };
-

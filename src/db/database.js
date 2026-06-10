@@ -32,10 +32,17 @@ function initDatabase(userDataPath) {
     CREATE INDEX IF NOT EXISTS idx_transactions_order_code ON transactions(order_code);
     CREATE INDEX IF NOT EXISTS idx_transactions_created_at ON transactions(created_at);
 
+    CREATE TABLE IF NOT EXISTS suppliers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS order_meta (
       order_code TEXT PRIMARY KEY,
       supplier_cost INTEGER DEFAULT 0,
       supplier_paid INTEGER DEFAULT 0,
+      supplier_id INTEGER REFERENCES suppliers(id),
       updated_at TEXT
     );
 
@@ -101,6 +108,7 @@ function initDatabase(userDataPath) {
 
   // Lightweight schema migrations for existing databases.
   ensureProductsColumns(db);
+  ensureOrderMetaColumns(db);
   ensureSalesUniqueness(db);
   ensurePriceHistory(db);
 
@@ -121,6 +129,15 @@ function initDatabase(userDataPath) {
   }
 
   return db;
+}
+
+function ensureOrderMetaColumns(dbConn) {
+  const cols = dbConn.prepare("PRAGMA table_info(order_meta)").all();
+  const existing = new Set(cols.map((c) => c.name));
+
+  if (!existing.has("supplier_id")) {
+    dbConn.exec("ALTER TABLE order_meta ADD COLUMN supplier_id INTEGER REFERENCES suppliers(id)");
+  }
 }
 
 function ensureProductsColumns(dbConn) {

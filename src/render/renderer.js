@@ -30,10 +30,17 @@ let currentCurrency = "USD";
 let usdToLbpRate = 90000;
 let allRowsCache = [];
 let currentRowsView = [];
+let supplierListCache = [];
+let tableSortKey = null;
+let tableSortDir = "asc";
+let summarySortKey = "supplier_name";
+let summarySortDir = "asc";
+let supplierFilter = null;
 
 const COLUMN_DEFS = [
   { key: "view", label: "View" },
   { key: "order", label: "Order" },
+  { key: "supplier", label: "Supplier" },
   { key: "gross", label: "Gross" },
   { key: "service", label: "Service" },
   { key: "vat", label: "VAT" },
@@ -186,10 +193,20 @@ function calculateTotalsFromRows(rows, includeSettlements) {
   return totals;
 }
 
+function getSelectedSupplierIds() {
+  return supplierFilter ? supplierFilter.getSelectedIds() : null;
+}
+
 function getFilteredRows(rows) {
   const paidFilter = selPaidFilter.value || "all";
   const typeFilter = selTypeFilter?.value || "all";
+  const supplierIds = getSelectedSupplierIds();
+
   return rows.filter((r) => {
+    if (supplierIds && supplierIds.length > 0) {
+      if (!r.supplier_id || !supplierIds.includes(r.supplier_id)) return false;
+    }
+
     if (paidFilter === "paid" && !r.supplier_paid) return false;
     if (paidFilter === "unpaid" && r.supplier_paid) return false;
 
@@ -204,6 +221,113 @@ function getFilteredRows(rows) {
   });
 }
 
+function sortRows(rows, key, dir) {
+  if (!key) return rows;
+  const sorted = [...rows];
+  const mult = dir === "desc" ? -1 : 1;
+
+  sorted.sort((a, b) => {
+    let av = a[key];
+    let bv = b[key];
+
+    if (key === "supplier_name") {
+      av = String(av || "").toLowerCase();
+      bv = String(bv || "").toLowerCase();
+      return av.localeCompare(bv) * mult;
+    }
+
+    av = Number(av || 0);
+    bv = Number(bv || 0);
+    return (av - bv) * mult;
+  });
+
+  return sorted;
+}
+
+function applyTableSort(rows) {
+  return sortRows(rows, tableSortKey, tableSortDir);
+}
+
+async function loadSupplierList() {
+  try {
+    supplierListCache = await window.api.suppliersGetAll();
+    if (supplierFilter) supplierFilter.reload();
+  } catch (e) {
+    console.error("Failed to load suppliers:", e);
+  }
+}
+
+function renderSupplierSummary(rows) {
+  const tbody = $("supplierSummaryBody");
+  if (!tbody) return;
+
+  const bySupplier = new Map();
+
+  for (const o of rows) {
+    const key = o.supplier_id || 0;
+    const name = o.supplier_name || "(Unassigned)";
+
+    if (!bySupplier.has(key)) {
+      bySupplier.set(key, {
+        supplier_name: name,
+        orders: 0,
+        revenue: 0,
+        supplier_cost: 0,
+        payable: 0,
+        profit: 0,
+      });
+    }
+
+    const row = bySupplier.get(key);
+    row.orders += 1;
+    row.revenue += Number(o.merchant_payout || 0);
+    row.supplier_cost += Number(o.supplier_cost || 0);
+    if (!o.supplier_paid) row.payable += Number(o.supplier_cost || 0);
+    row.profit += Number(o.net_profit || 0);
+  }
+
+  let summaryRows = Array.from(bySupplier.values());
+  summaryRows = sortRows(summaryRows, summarySortKey, summarySortDir);
+
+  tbody.innerHTML = summaryRows
+    .map(
+      (s) => `
+    <tr>
+      <td>${escapeHtml(s.supplier_name)}</td>
+      <td class="num">${s.orders}</td>
+      <td class="num">${fmt(s.revenue)}</td>
+      <td class="num">${fmt(s.supplier_cost)}</td>
+      <td class="num">${fmt(s.payable)}</td>
+      <td class="num">${fmt(s.profit)}</td>
+    </tr>
+  `
+    )
+    .join("");
+}
+
+function escapeHtml(str) {
+  return String(str || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function buildSupplierSelectHtml(selectedId) {
+  const options = ['<option value="">— Select —</option>'];
+  for (const s of supplierListCache) {
+    const sel = Number(selectedId) === Number(s.id) ? " selected" : "";
+    options.push(`<option value="${s.id}"${sel}>${escapeHtml(s.name)}</option>`);
+  }
+  return options.join("");
+}
+
+function getSupplierIdFromRow(orderCode) {
+  const el = tbody.querySelector(`select[data-kind='supplier'][data-order='${orderCode}']`);
+  if (!el || !el.value) return null;
+  return Number(el.value) || null;
+}
+
 function renderRows(rows) {
   tbody.innerHTML = "";
 
@@ -216,6 +340,13 @@ function renderRows(rows) {
     View
   </button></td>
       <td data-col="order">${r.order_code}</td>
+      <td data-col="supplier">
+        <select
+          class="sel-supplier"
+          data-order="${r.order_code}"
+          data-kind="supplier"
+        >${buildSupplierSelectHtml(r.supplier_id)}</select>
+      </td>
       <td class="num" data-col="gross">${fmt(r.gross)}</td>
       <td class="num" data-col="service">${fmt(r.service_fee)}</td>
       <td class="num" data-col="vat">${fmt(r.vat)}</td>
@@ -252,14 +383,47 @@ function renderRows(rows) {
 });
 
   // wire inputs
+  tbody.querySelectorAll("select[data-kind='supplier']").forEach((sel) => {
+    sel.addEventListener("change", async (e) => {
+      const order_code = e.target.getAttribute("data-order");
+      const supplier_id = e.target.value ? Number(e.target.value) : null;
+      const costEl = tbody.querySelector(`input[data-kind='cost'][data-order='${order_code}']`);
+      const paidEl = tbody.querySelector(`input[data-kind='paid'][data-order='${order_code}']`);
+      const supplier_cost = costEl ? supplierCostDisplayToLbp(costEl.value) : 0;
+      const supplier_paid = paidEl ? paidEl.checked : false;
+
+      const res = await window.api.ordersUpsertMeta({
+        order_code,
+        supplier_cost,
+        supplier_paid,
+        supplier_id,
+      });
+      if (res?.ok === false) {
+        setError(res.error || "Failed to save supplier");
+        return;
+      }
+      await refresh();
+    });
+  });
+
   tbody.querySelectorAll("input[data-kind='cost']").forEach((inp) => {
     inp.addEventListener("change", async (e) => {
       const order_code = e.target.getAttribute("data-order");
       const supplier_cost = supplierCostDisplayToLbp(e.target.value);
       const paidEl = tbody.querySelector(`input[data-kind='paid'][data-order='${order_code}']`);
       const supplier_paid = paidEl ? paidEl.checked : false;
+      const supplier_id = getSupplierIdFromRow(order_code);
 
-      await window.api.ordersUpsertMeta({ order_code, supplier_cost, supplier_paid });
+      const res = await window.api.ordersUpsertMeta({
+        order_code,
+        supplier_cost,
+        supplier_paid,
+        supplier_id,
+      });
+      if (res?.ok === false) {
+        setError(res.error || "Failed to save supplier cost");
+        return;
+      }
       await refresh();
     });
   });
@@ -270,8 +434,18 @@ function renderRows(rows) {
       const paid = e.target.checked;
       const costEl = tbody.querySelector(`input[data-kind='cost'][data-order='${order_code}']`);
       const supplier_cost = costEl ? supplierCostDisplayToLbp(costEl.value) : 0;
+      const supplier_id = getSupplierIdFromRow(order_code);
 
-      await window.api.ordersUpsertMeta({ order_code, supplier_cost, supplier_paid: paid });
+      const res = await window.api.ordersUpsertMeta({
+        order_code,
+        supplier_cost,
+        supplier_paid: paid,
+        supplier_id,
+      });
+      if (res?.ok === false) {
+        setError(res.error || "Failed to save paid status");
+        return;
+      }
       await refresh();
     });
   });
@@ -281,12 +455,23 @@ function renderRows(rows) {
 
 async function refresh() {
   setError("");
+  await loadSupplierList();
   const includeSettlements = chkSettlements.checked;
   const rows = await window.api.ordersGetReconciliation();
   allRowsCache = rows;
-  currentRowsView = getFilteredRows(rows);
+  currentRowsView = applyTableSort(getFilteredRows(rows));
   renderRows(currentRowsView);
   setStats(calculateTotalsFromRows(currentRowsView, includeSettlements));
+  renderSupplierSummary(currentRowsView);
+}
+
+async function refreshViewFromCache() {
+  await loadSupplierList();
+  const includeSettlements = chkSettlements.checked;
+  currentRowsView = applyTableSort(getFilteredRows(allRowsCache));
+  renderRows(currentRowsView);
+  setStats(calculateTotalsFromRows(currentRowsView, includeSettlements));
+  renderSupplierSummary(currentRowsView);
 }
 
 async function loadWalletConfig() {
@@ -343,6 +528,42 @@ $("btnExportCsv").addEventListener("click", async () => {
   }
 });
 
+$("btnExportData").addEventListener("click", async () => {
+  try {
+    const res = await window.api.exportBackup();
+    if (res?.canceled) return;
+    if (!res?.ok) {
+      setError(res?.error || "Export failed");
+      return;
+    }
+    alert(`Data exported to:\n${res.path}`);
+  } catch (e) {
+    setError(e);
+  }
+});
+
+$("btnImportData").addEventListener("click", async () => {
+  if (
+    !confirm(
+      "Importing a backup will replace all existing data. Are you sure?"
+    )
+  ) {
+    return;
+  }
+  try {
+    const res = await window.api.importBackup();
+    if (res?.canceled) return;
+    if (!res?.ok) {
+      setError(res?.error || "Import failed");
+      return;
+    }
+    alert("Import successful. The application will reload now.");
+    location.reload();
+  } catch (e) {
+    setError(e);
+  }
+});
+
 $("btnResetSupplier").addEventListener("click", async () => {
   if (!confirm("Reset all supplier costs & paid flags?")) return;
   try {
@@ -387,6 +608,9 @@ $("btnDbAdmin").addEventListener("click", () => {
 $("btnProducts").addEventListener("click", () => {
   window.api.openProducts();
 });
+$("btnSuppliers").addEventListener("click", () => {
+  window.api.openSuppliers();
+});
 $("btnRevenueDashboard").addEventListener("click", () => {
   window.api.openRevenueDashboard();
 });
@@ -424,16 +648,33 @@ selCurrencyDisplay.addEventListener("change", () => {
   refresh().catch(setError);
 });
 
-selPaidFilter.addEventListener("change", () => {
-  currentRowsView = getFilteredRows(allRowsCache);
-  renderRows(currentRowsView);
-  setStats(calculateTotalsFromRows(currentRowsView, chkSettlements.checked));
+selPaidFilter.addEventListener("change", () => refreshViewFromCache().catch(setError));
+selTypeFilter?.addEventListener("change", () => refreshViewFromCache().catch(setError));
+
+document.querySelectorAll("th[data-sort]").forEach((th) => {
+  th.addEventListener("click", () => {
+    const key = th.getAttribute("data-sort");
+    if (tableSortKey === key) {
+      tableSortDir = tableSortDir === "asc" ? "desc" : "asc";
+    } else {
+      tableSortKey = key;
+      tableSortDir = "asc";
+    }
+    refreshViewFromCache().catch(setError);
+  });
 });
 
-selTypeFilter?.addEventListener("change", () => {
-  currentRowsView = getFilteredRows(allRowsCache);
-  renderRows(currentRowsView);
-  setStats(calculateTotalsFromRows(currentRowsView, chkSettlements.checked));
+document.querySelectorAll("[data-summary-sort]").forEach((th) => {
+  th.addEventListener("click", () => {
+    const key = th.getAttribute("data-summary-sort");
+    if (summarySortKey === key) {
+      summarySortDir = summarySortDir === "asc" ? "desc" : "asc";
+    } else {
+      summarySortKey = key;
+      summarySortDir = "asc";
+    }
+    renderSupplierSummary(currentRowsView);
+  });
 });
 
 btnColumns.addEventListener("click", () => {
@@ -450,7 +691,8 @@ $("btnGenerateSales").addEventListener("click", async () => {
   try {
     const from = salesFrom.value || null;
     const to = salesTo.value || null;
-    const rows = await window.api.salesReport({ from, to });
+    const supplierIds = getSelectedSupplierIds();
+    const rows = await window.api.salesReport({ from, to, supplierIds });
     const totalProfit = rows.reduce((sum, r) => sum + (Number(r.profit || 0)), 0);
     alert(`Products: ${rows.length}\nTotal profit (USD): ${totalProfit.toFixed(2)}`);
   } catch (e) {
@@ -462,7 +704,8 @@ $("btnExportSalesExcel").addEventListener("click", async () => {
   try {
     const from = salesFrom.value || null;
     const to = salesTo.value || null;
-    const res = await window.api.salesExportExcel({ from, to });
+    const supplierIds = getSelectedSupplierIds();
+    const res = await window.api.salesExportExcel({ from, to, supplierIds });
     if (res && res.ok) {
       alert(`Sales report exported to: ${res.path}`);
     } else if (!res?.canceled) {
@@ -512,6 +755,9 @@ $("btnSyncSales").addEventListener("click", async () => {
 
 // Initial load
 loadWalletConfig().then(() => {
+  supplierFilter = createSupplierFilter($("supplierFilterContainer"), {
+    onChange: () => refreshViewFromCache().catch(setError),
+  });
   renderColumnsPanel();
   applyColumnVisibility();
   refresh().catch(setError);

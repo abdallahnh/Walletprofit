@@ -269,11 +269,15 @@ Example:
     </div>
 
     <div class="import-section">
-      <h2 class="section-title">Backup Operations</h2>
+      <h2 class="section-title">Backup &amp; Restore</h2>
+      <p class="description" style="margin-bottom: 15px;">
+        Export the entire application database (transactions, suppliers, products, sales, settings).
+        Import replaces all existing data after confirmation.
+      </p>
 
       <div class="button-group">
-        <button class="btn-success" id="btnExportBackup">Export Backup</button>
-        <button class="btn-outline" id="btnImportBackup">Import Backup</button>
+        <button class="btn-success" id="btnExportBackup">Export Data</button>
+        <button class="btn-outline" id="btnImportBackup">Import Data</button>
       </div>
 
       <div id="backupStatusMessage"></div>
@@ -409,15 +413,17 @@ Example:
 
     btnExportBackup.addEventListener('click', async () => {
       try {
-        showBackupStatus('Exporting backup...', 'info');
+        showBackupStatus('Exporting data...', 'info');
         btnExportBackup.disabled = true;
 
         const result = await window.api.exportBackup();
 
-        if (result) {
-          showBackupStatus(`Backup exported to: ${result}`, 'success');
+        if (result?.canceled) {
+          clearBackupStatus();
+        } else if (result?.ok) {
+          showBackupStatus(`Data exported to: ${result.path}`, 'success');
         } else {
-          showBackupStatus('Backup export failed', 'error');
+          showBackupStatus(result?.error || 'Export failed', 'error');
         }
       } catch (error) {
         showBackupStatus('Export failed: ' + error.message, 'error');
@@ -427,19 +433,23 @@ Example:
     });
 
     btnImportBackup.addEventListener('click', async () => {
+      if (!confirm('Importing a backup will replace all existing data. Are you sure?')) {
+        return;
+      }
+
       try {
-        showBackupStatus('Importing backup...', 'info');
+        showBackupStatus('Importing data...', 'info');
         btnImportBackup.disabled = true;
 
         const result = await window.api.importBackup();
 
-        if (result && !result.canceled) {
-          showBackupStatus(
-            `Backup imported successfully! Transactions: ${result.imported_transactions}, Meta: ${result.imported_meta}`,
-            'success'
-          );
-        } else if (!result?.canceled) {
-          showBackupStatus('Backup import failed', 'error');
+        if (result?.canceled) {
+          clearBackupStatus();
+        } else if (result?.ok) {
+          showBackupStatus('Import successful. Reloading application...', 'success');
+          setTimeout(() => location.reload(), 800);
+        } else {
+          showBackupStatus(result?.error || 'Import failed', 'error');
         }
       } catch (error) {
         showBackupStatus('Import failed: ' + error.message, 'error');
