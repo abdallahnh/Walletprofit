@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const Database = require("better-sqlite3");
-const { getDb, getDbPath } = require("./database");
+const { getDb, getDbPath, replaceDatabaseFromFile } = require("./database");
 
 const BACKUP_SCHEMA_VERSION = 3;
 
@@ -552,17 +552,11 @@ async function importSqliteBackupFromFile(filePath) {
   const validation = validateSqliteBackup(filePath);
   if (!validation.valid) return { ok: false, error: validation.error };
 
-  clearAllData();
-
-  const source = new Database(filePath, { readonly: true, fileMustExist: true });
-  const db = getDb();
   try {
-    await source.backup(db);
+    replaceDatabaseFromFile(filePath);
     return { ok: true, replaced: true, format: "sqlite" };
   } catch (e) {
     return { ok: false, error: `SQLite restore failed: ${String(e.message || e)}` };
-  } finally {
-    source.close();
   }
 }
 

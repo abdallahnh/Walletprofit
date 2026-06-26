@@ -256,6 +256,40 @@ function ensurePriceHistory(dbConn) {
   `);
 }
 
+function closeDatabase() {
+  if (!db) return;
+  try {
+    db.pragma("wal_checkpoint(TRUNCATE)");
+    db.close();
+  } catch {
+    // ignore close errors during restore
+  }
+  db = null;
+}
+
+function replaceDatabaseFromFile(sourceFilePath) {
+  if (!dbPath) {
+    throw new Error("Database not initialized. Call initDatabase(userDataPath) first.");
+  }
+
+  const userDataPath = path.dirname(dbPath);
+  const target = dbPath;
+
+  closeDatabase();
+
+  fs.copyFileSync(sourceFilePath, target);
+  for (const suffix of ["-wal", "-shm"]) {
+    try {
+      fs.unlinkSync(target + suffix);
+    } catch {
+      // no wal/shm file
+    }
+  }
+
+  initDatabase(userDataPath);
+  return { ok: true };
+}
+
 function getDb() {
   if (!db) {
     throw new Error("Database not initialized. Call initDatabase(userDataPath) first.");
@@ -272,6 +306,8 @@ function getDbPath() {
 
 module.exports = {
   initDatabase,
+  closeDatabase,
+  replaceDatabaseFromFile,
   getDb,
   getDbPath,
 };
