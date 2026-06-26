@@ -1,7 +1,7 @@
 const path = require("path");
 const fs = require("fs");
 const { getDb, getDbPath } = require("./database");
-const { normalizeType } = require("./wallet");
+const { getWalletConfig } = require("./wallet");
 const { getOrCreateSupplier } = require("./suppliers");
 
 function computeOrders() {
@@ -398,6 +398,104 @@ function importOrdersCsvFromFile(filePath) {
   return importOrdersCsv(text);
 }
 
+function enrichBillLinesFromApiOrder(orderDetail, supplierCostLbp, usdToLbpRate) {
+  const items = orderDetail || [];
+  const supplierCostUsd = Number(supplierCostLbp || 0) / Number(usdToLbpRate || 90000);
+  const totalSaleLbp = items.reduce((sum, d) => sum + Number(d.total || 0), 0);
+
+  return items.map((detail) => {
+    const item = detail.item || {};
+    const qty = Number(detail.quantity || 0) || 1;
+    const lineTotalLbp = Number(detail.total || 0);
+    const share = totalSaleLbp > 0 ? lineTotalLbp / totalSaleLbp : 0;
+    const lineCostUsd = share * supplierCostUsd;
+    return {
+      item_name: item.ref || item.item_name || item.name || "Item",
+      barcode: item.barcode || "",
+      brand: item.brand || "",
+      quantity: qty,
+      unit_cost_usd: qty > 0 ? lineCostUsd / qty : 0,
+      line_cost_usd: lineCostUsd,
+    };
+  });
+}
+
+function usdToDisplay(usd, displayCurrency, usdToLbpRate) {
+  if (displayCurrency === "LBP") return Math.round(Number(usd || 0) * usdToLbpRate);
+  return Math.round(Number(usd || 0) * 100) / 100;
+}
+
+function getOrderBillData(orderCode, apiOrderDetail) {
+  const cfg = getWalletConfig() || {};
+  const usdToLbpRate = Number(cfg.usdToLbpRate || 90000);
+  const displayCurrency = String(cfg.displayCurrency || "USD").toUpperCase();
+
+  const { orders } = computeOrders();
+  const summary = orders.find((o) => o.order_code === orderCode) || null;
+
+  const supplier_cost_lbp = summary?.supplier_cost || 0;
+  const supplier_name = summary?.supplier_name || "(Unassigned)";
+  const supplier_paid = !!(summary?.supplier_paid);
+
+  const db = getDb();
+  const salesRows = db
+    .prepare(
+      `
+    SELECT s.quantity, s.cost, s.total_sale, s.unit_price,
+           p.item_name, p.barcode, p.brand
+    FROM sales s
+    LEFT JOIN products p ON p.id = s.product_id
+    WHERE s.order_code = ?
+    ORDER BY p.item_name
+  `
+    )
+    .all(orderCode);
+
+  let lines = salesRows.map((r) => {
+    const qty = Number(r.quantity || 0);
+    const lineCostUsd = Number(r.cost || 0);
+    return {
+      item_name: r.item_name || r.barcode || "Item",
+      barcode: r.barcode || "",
+      brand: r.brand || "",
+      quantity: qty,
+      unit_cost_usd: qty > 0 ? lineCostUsd / qty : 0,
+      line_cost_usd: lineCostUsd,
+    };
+  });
+
+  if (!lines.length && apiOrderDetail?.length) {
+    lines = enrichBillLinesFromApiOrder(apiOrderDetail, supplier_cost_lbp, usdToLbpRate);
+  }
+
+  const total_cost_usd =
+    lines.length > 0
+      ? lines.reduce((sum, l) => sum + l.line_cost_usd, 0)
+      : supplier_cost_lbp / usdToLbpRate;
+
+  const linesWithDisplay = lines.map((l) => ({
+    ...l,
+    unit_cost_display: usdToDisplay(l.unit_cost_usd, displayCurrency, usdToLbpRate),
+    line_cost_display: usdToDisplay(l.line_cost_usd, displayCurrency, usdToLbpRate),
+  }));
+
+  return {
+    order_code: orderCode,
+    supplier_name,
+    supplier_cost_lbp,
+    supplier_cost_usd: supplier_cost_lbp / usdToLbpRate,
+    supplier_paid,
+    merchant_payout_lbp: summary?.merchant_payout || 0,
+    gross_lbp: summary?.gross || 0,
+    order_date: summary?.primary_date || String(summary?.dates || "").split(" | ")[0] || "",
+    display_currency: displayCurrency,
+    usd_to_lbp_rate: usdToLbpRate,
+    lines: linesWithDisplay,
+    total_cost_usd,
+    total_cost_display: usdToDisplay(total_cost_usd, displayCurrency, usdToLbpRate),
+  };
+}
+
 module.exports = {
   computeOrders,
   getOrdersReconciliation,
@@ -408,4 +506,5 @@ module.exports = {
   exportOrdersCsv,
   importOrdersCsv,
   importOrdersCsvFromFile,
+  getOrderBillData,
 };

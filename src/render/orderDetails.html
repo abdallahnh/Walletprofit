@@ -6,15 +6,33 @@
 
   <style>
     body {
-      font-family: system-ui;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
       margin: 0;
       padding: 20px;
       background: #f5f6f8;
     }
 
-    h2 {
-      margin-bottom: 10px;
+    h2 { margin-bottom: 10px; }
+
+    .top-actions {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
     }
+
+    button {
+      padding: 10px 16px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .btn-primary { background: #111; color: #fff; }
+    .btn-secondary { background: #eee; color: #111; }
+    .btn-outline { background: #fff; border: 1px solid #ddd; color: #333; }
 
     .section {
       background: white;
@@ -46,20 +64,113 @@
       margin-bottom: 8px;
     }
 
-    .label {
+    .label { font-size: 13px; color: #666; }
+    .value { font-weight: 600; margin-bottom: 6px; }
+
+    /* Bill modal */
+    .bill-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.45);
+      z-index: 100;
+    }
+    .bill-backdrop.open { display: block; }
+
+    .bill-modal {
+      display: none;
+      position: fixed;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: min(860px, calc(100vw - 32px));
+      max-height: calc(100vh - 40px);
+      overflow: auto;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+      z-index: 101;
+      padding: 0;
+    }
+    .bill-modal.open { display: block; }
+
+    .bill-toolbar {
+      display: flex;
+      gap: 8px;
+      padding: 12px 16px;
+      border-bottom: 1px solid #eee;
+      background: #fafafa;
+      border-radius: 12px 12px 0 0;
+      flex-wrap: wrap;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+
+    .bill-toolbar h3 { margin: 0; flex: 1; font-size: 15px; }
+
+    .bill-content { padding: 24px; }
+
+    .bill-header { text-align: center; margin-bottom: 20px; }
+    .bill-header h1 { margin: 0 0 6px; font-size: 22px; }
+    .bill-header p { margin: 0; color: #666; font-size: 13px; }
+
+    .bill-meta {
+      display: grid;
+      grid-template-columns: 140px 1fr;
+      gap: 8px 12px;
+      margin-bottom: 20px;
+      font-size: 14px;
+    }
+
+    .bill-table {
+      width: 100%;
+      border-collapse: collapse;
       font-size: 13px;
+    }
+    .bill-table th, .bill-table td {
+      border: 1px solid #ddd;
+      padding: 10px 8px;
+      text-align: left;
+    }
+    .bill-table th { background: #f5f5f5; font-weight: 600; }
+    .bill-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .bill-table tfoot td { background: #fafafa; font-weight: 700; }
+
+    .bill-footer {
+      margin-top: 20px;
+      font-size: 12px;
       color: #666;
     }
 
-    .value {
-      font-weight: 600;
-      margin-bottom: 6px;
+    .status-paid { color: #155724; font-weight: 600; }
+    .status-unpaid { color: #b00020; font-weight: 600; }
+
+    @media print {
+      body * { visibility: hidden; }
+      .bill-modal, .bill-modal * { visibility: visible; }
+      .bill-modal {
+        position: absolute;
+        left: 0; top: 0;
+        transform: none;
+        width: 100%;
+        max-height: none;
+        box-shadow: none;
+        border-radius: 0;
+      }
+      .bill-toolbar, .bill-backdrop { display: none !important; }
+      .bill-content { padding: 0; }
     }
   </style>
 </head>
 <body>
 
   <h2 id="orderTitle"></h2>
+
+  <div class="top-actions">
+    <button class="btn-primary" id="btnViewBill">Supplier Bill</button>
+  </div>
 
   <div class="section">
     <h3>Customer Info</h3>
@@ -76,6 +187,19 @@
   <div class="section">
     <h3>Items</h3>
     <div id="itemsContainer" class="items-grid"></div>
+  </div>
+
+  <!-- Supplier Bill Modal -->
+  <div id="billBackdrop" class="bill-backdrop"></div>
+  <div id="billModal" class="bill-modal" role="dialog">
+    <div class="bill-toolbar">
+      <h3>Supplier Payment Bill</h3>
+      <button class="btn-outline" id="btnPrintBill">Print</button>
+      <button class="btn-outline" id="btnExportExcel">Save Excel</button>
+      <button class="btn-outline" id="btnExportWord">Save Word</button>
+      <button class="btn-secondary" id="btnCloseBill">Close</button>
+    </div>
+    <div class="bill-content" id="billContent"></div>
   </div>
 
   <script src="orderDetails.js"></script>

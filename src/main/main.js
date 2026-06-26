@@ -10,6 +10,7 @@ const productsDb = require("../db/products");
 const salesDb = require("../db/sales");
 const adminDb = require("../db/admin");
 const suppliersDb = require("../db/suppliers");
+const billExport = require("../db/billExport");
 
 const logger = require("../utils/logger");
 
@@ -328,6 +329,8 @@ ipcMain.handle("open-order", async (_, orderCode) => {
   const order = await loadDetailsByCode(orderCode);
   if (!order) return;
 
+  const billData = ordersDb.getOrderBillData(orderCode, order.order_detail);
+
   const orderPath = path.join(app.getAppPath(), "src", "render", "orderDetails.html");
 
   const win = new BrowserWindow({
@@ -342,8 +345,49 @@ ipcMain.handle("open-order", async (_, orderCode) => {
   win.loadFile(orderPath);
 
   win.webContents.on("did-finish-load", () => {
-    win.webContents.send("order-data", order);
+    win.webContents.send("order-data", { order, billData });
   });
+});
+
+ipcMain.handle("bill:exportExcel", async (_evt, billData) => {
+  if (!billData?.order_code) return { ok: false, error: "Missing bill data" };
+
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    title: "Save Supplier Bill (Excel)",
+    defaultPath: `supplier-bill-${billData.order_code}.xlsx`,
+    filters: [{ name: "Excel", extensions: ["xlsx"] }],
+  });
+
+  if (canceled || !filePath) return { ok: false, canceled: true };
+
+  try {
+    billExport.exportBillExcel(billData, filePath);
+    return { ok: true, path: filePath };
+  } catch (e) {
+    return { ok: false, error: String(e.message || e) };
+  }
+});
+
+ipcMain.handle("bill:exportWord", async (_evt, billData) => {
+  if (!billData?.order_code) return { ok: false, error: "Missing bill data" };
+
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    title: "Save Supplier Bill (Word)",
+    defaultPath: `supplier-bill-${billData.order_code}.doc`,
+    filters: [
+      { name: "Word Document", extensions: ["doc"] },
+      { name: "HTML", extensions: ["html"] },
+    ],
+  });
+
+  if (canceled || !filePath) return { ok: false, canceled: true };
+
+  try {
+    billExport.exportBillWord(billData, filePath);
+    return { ok: true, path: filePath };
+  } catch (e) {
+    return { ok: false, error: String(e.message || e) };
+  }
 });
 
 ipcMain.handle("open-products", () => {
