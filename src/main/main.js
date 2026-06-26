@@ -183,7 +183,48 @@ ipcMain.handle("supplier:reset", async () => {
 });
 
 ipcMain.handle("export:csv", async () => {
-  return ordersDb.exportOrdersCsv();
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    title: "Export Orders CSV",
+    defaultPath: (() => {
+      const now = new Date();
+      const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      return `orders-reconciliation-${stamp}.csv`;
+    })(),
+    filters: [{ name: "CSV", extensions: ["csv"] }],
+  });
+
+  if (canceled || !filePath) return { ok: false, canceled: true };
+  const outPath = ordersDb.exportOrdersCsv(filePath);
+  return { ok: true, path: outPath };
+});
+
+ipcMain.handle("import:walletFile", async () => {
+  const res = await dialog.showOpenDialog({
+    properties: ["openFile"],
+    filters: [
+      { name: "Wallet Data", extensions: ["tsv", "csv", "txt"] },
+    ],
+  });
+  if (res.canceled || !res.filePaths?.length) return { ok: false, canceled: true };
+  try {
+    const result = walletDb.importWalletFromFile(res.filePaths[0]);
+    return { ok: true, ...result, path: res.filePaths[0] };
+  } catch (e) {
+    return { ok: false, error: String(e.message || e) };
+  }
+});
+
+ipcMain.handle("import:ordersCsv", async () => {
+  const res = await dialog.showOpenDialog({
+    properties: ["openFile"],
+    filters: [{ name: "CSV", extensions: ["csv"] }],
+  });
+  if (res.canceled || !res.filePaths?.length) return { ok: false, canceled: true };
+  try {
+    return ordersDb.importOrdersCsvFromFile(res.filePaths[0]);
+  } catch (e) {
+    return { ok: false, error: String(e.message || e) };
+  }
 });
 
 ipcMain.handle("suppliers:getAll", async () => {

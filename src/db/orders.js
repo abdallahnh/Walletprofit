@@ -212,7 +212,14 @@ function getTotals(opts = {}) {
   return totals;
 }
 
-function upsertOrderMeta({ order_code, supplier_cost, supplier_paid, supplier_name, supplier_id }) {
+function upsertOrderMeta({
+  order_code,
+  supplier_cost,
+  supplier_paid,
+  supplier_name,
+  supplier_id,
+  requireSupplier = true,
+}) {
   if (!order_code) return { ok: false, error: "Missing order_code" };
 
   const cost = Math.trunc(supplier_cost || 0);
@@ -230,7 +237,7 @@ function upsertOrderMeta({ order_code, supplier_cost, supplier_paid, supplier_na
     resolvedSupplierId = supplier_id ? Number(supplier_id) || null : null;
   }
 
-  if ((cost > 0 || paid) && !resolvedSupplierId) {
+  if (requireSupplier && (cost > 0 || paid) && !resolvedSupplierId) {
     return { ok: false, error: "Supplier name is required when setting cost or paid status" };
   }
 
@@ -257,7 +264,7 @@ function resetSupplierMeta() {
   return { ok: true };
 }
 
-function exportOrdersCsv() {
+function exportOrdersCsv(destPath) {
   const { orders } = computeOrders();
   const dbPath = getDbPath();
 
@@ -297,9 +304,98 @@ function exportOrdersCsv() {
     lines.push(row.join(","));
   }
 
-  const outPath = path.join(path.dirname(dbPath), "orders-reconciliation.csv");
+  const outPath =
+    destPath || path.join(path.dirname(dbPath), "orders-reconciliation.csv");
   fs.writeFileSync(outPath, lines.join("\n"), "utf8");
   return outPath;
+}
+
+function parseCsvLine(line) {
+  const parts = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === "," && !inQuotes) {
+      parts.push(current.trim());
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  parts.push(current.trim());
+  return parts;
+}
+
+function importOrdersCsv(text) {
+  const lines = String(text || "")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  if (lines.length < 2) {
+    return { ok: false, error: "CSV file is empty or has no data rows" };
+  }
+
+  const header = parseCsvLine(lines[0]).map((h) => h.toLowerCase());
+  const idx = (name) => header.indexOf(name);
+
+  const orderCodeIdx = idx("order_code");
+  const supplierNameIdx = idx("supplier_name");
+  const supplierCostIdx = idx("supplier_cost");
+  const supplierPaidIdx = idx("supplier_paid");
+
+  if (orderCodeIdx < 0) {
+    return { ok: false, error: "CSV must include an order_code column" };
+  }
+
+  let updated = 0;
+  let skipped = 0;
+
+  for (let i = 1; i < lines.length; i += 1) {
+    const cols = parseCsvLine(lines[i]);
+    const order_code = cols[orderCodeIdx];
+    if (!order_code) {
+      skipped += 1;
+      continue;
+    }
+
+    const supplier_name =
+      supplierNameIdx >= 0 ? String(cols[supplierNameIdx] || "").replace(/^"|"$/g, "") : "";
+    const supplier_cost =
+      supplierCostIdx >= 0 ? Math.trunc(Number(cols[supplierCostIdx] || 0)) : 0;
+    const supplier_paid =
+      supplierPaidIdx >= 0 ? ["1", "true", "yes"].includes(String(cols[supplierPaidIdx]).toLowerCase()) : false;
+
+    const res = upsertOrderMeta({
+      order_code,
+      supplier_cost,
+      supplier_paid,
+      supplier_name: supplier_name || undefined,
+      requireSupplier: false,
+    });
+
+    if (res?.ok === false) {
+      skipped += 1;
+    } else {
+      updated += 1;
+    }
+  }
+
+  return { ok: true, updated, skipped, total: lines.length - 1 };
+}
+
+function importOrdersCsvFromFile(filePath) {
+  const text = fs.readFileSync(filePath, "utf8");
+  return importOrdersCsv(text);
 }
 
 module.exports = {
@@ -310,4 +406,6 @@ module.exports = {
   upsertOrderMeta,
   resetSupplierMeta,
   exportOrdersCsv,
+  importOrdersCsv,
+  importOrdersCsvFromFile,
 };

@@ -14,6 +14,8 @@ function initDatabase(userDataPath) {
     fs.mkdirSync(dir, { recursive: true });
   }
 
+  migrateLegacyDatabase(userDataPath, dbPath);
+
   db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
 
@@ -129,6 +131,51 @@ function initDatabase(userDataPath) {
   }
 
   return db;
+}
+
+function migrateLegacyDatabase(userDataPath, targetDbPath) {
+  const parentDir = path.dirname(userDataPath);
+  const legacyDirs = [
+    path.join(parentDir, "Wallet Profit"),
+    path.join(parentDir, "wallet-profit-app"),
+    path.join(parentDir, "ANWallet"),
+  ];
+  const legacyFiles = ["wallet-profit.sqlite", "wallet_profit.sqlite"];
+
+  let hasData = false;
+  if (fs.existsSync(targetDbPath)) {
+    try {
+      const probe = new Database(targetDbPath, { readonly: true });
+      const row = probe.prepare("SELECT COUNT(*) AS c FROM transactions").get();
+      hasData = Number(row?.c || 0) > 0;
+      probe.close();
+    } catch {
+      hasData = false;
+    }
+  }
+
+  if (hasData) return { migrated: false };
+
+  for (const legacyDir of legacyDirs) {
+    if (legacyDir === userDataPath) continue;
+    for (const file of legacyFiles) {
+      const src = path.join(legacyDir, file);
+      if (!fs.existsSync(src)) continue;
+      try {
+        const probe = new Database(src, { readonly: true });
+        const row = probe.prepare("SELECT COUNT(*) AS c FROM transactions").get();
+        probe.close();
+        if (Number(row?.c || 0) === 0) continue;
+
+        fs.copyFileSync(src, targetDbPath);
+        return { migrated: true, from: src };
+      } catch {
+        // try next candidate
+      }
+    }
+  }
+
+  return { migrated: false };
 }
 
 function ensureOrderMetaColumns(dbConn) {

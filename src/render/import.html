@@ -261,6 +261,8 @@ Example:
 
       <div class="button-group">
         <button class="btn-primary" id="btnImport">Import Data</button>
+        <button class="btn-outline" id="btnImportWalletFile">Import TSV/CSV File</button>
+        <button class="btn-outline" id="btnImportOrdersCsv">Import Orders CSV</button>
         <button class="btn-secondary" id="btnClear">Clear</button>
         <button class="btn-outline" id="btnValidate">Validate Format</button>
       </div>
@@ -298,6 +300,8 @@ Example:
   <script>
     const importDataEl = document.getElementById('importData');
     const btnImport = document.getElementById('btnImport');
+    const btnImportWalletFile = document.getElementById('btnImportWalletFile');
+    const btnImportOrdersCsv = document.getElementById('btnImportOrdersCsv');
     const btnClear = document.getElementById('btnClear');
     const btnValidate = document.getElementById('btnValidate');
     const btnExportBackup = document.getElementById('btnExportBackup');
@@ -392,6 +396,48 @@ Example:
         showStatus('Import failed: ' + error.message, 'error');
       } finally {
         btnImport.disabled = false;
+      }
+    });
+
+    btnImportWalletFile.addEventListener('click', async () => {
+      try {
+        showStatus('Importing wallet file...', 'info');
+        const result = await window.api.importWalletFile();
+        if (result?.canceled) {
+          clearStatus();
+          return;
+        }
+        if (result?.ok === false) {
+          showStatus(result.error || 'Import failed', 'error');
+          return;
+        }
+        showStatus(
+          `Import successful! Inserted: ${result.inserted}, Duplicates ignored: ${result.ignored}`,
+          'success'
+        );
+      } catch (error) {
+        showStatus('Import failed: ' + error.message, 'error');
+      }
+    });
+
+    btnImportOrdersCsv.addEventListener('click', async () => {
+      try {
+        showStatus('Importing orders CSV...', 'info');
+        const result = await window.api.importOrdersCsv();
+        if (result?.canceled) {
+          clearStatus();
+          return;
+        }
+        if (result?.ok === false) {
+          showStatus(result.error || 'Import failed', 'error');
+          return;
+        }
+        showStatus(
+          `Orders CSV imported. Updated: ${result.updated}, Skipped: ${result.skipped}`,
+          'success'
+        );
+      } catch (error) {
+        showStatus('Import failed: ' + error.message, 'error');
       }
     });
 

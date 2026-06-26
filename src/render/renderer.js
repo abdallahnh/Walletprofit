@@ -521,11 +521,54 @@ $("btnRefresh").addEventListener("click", async () => {
 
 $("btnExportCsv").addEventListener("click", async () => {
   try {
-    const p = await window.api.exportCsv();
-    alert(`CSV exported to: ${p}`);
+    const res = await window.api.exportCsv();
+    if (res?.canceled) return;
+    if (!res?.ok) {
+      setError(res?.error || "Export failed");
+      return;
+    }
+    alert(`CSV exported to:\n${res.path}`);
   } catch (e) {
     setError(e);
   }
+});
+
+$("btnImportWallet").addEventListener("click", async () => {
+  try {
+    const res = await window.api.importWalletFile();
+    if (res?.canceled) return;
+    if (!res?.ok) {
+      setError(res?.error || "Import failed");
+      return;
+    }
+    await refresh();
+    alert(
+      `Wallet data imported.\nInserted: ${res.inserted || 0}\nDuplicates ignored: ${res.ignored || 0}`
+    );
+  } catch (e) {
+    setError(e);
+  }
+});
+
+$("btnImportOrdersCsv").addEventListener("click", async () => {
+  try {
+    const res = await window.api.importOrdersCsv();
+    if (res?.canceled) return;
+    if (!res?.ok) {
+      setError(res?.error || "Import failed");
+      return;
+    }
+    await refresh();
+    alert(
+      `Orders CSV imported.\nUpdated: ${res.updated || 0}\nSkipped: ${res.skipped || 0}`
+    );
+  } catch (e) {
+    setError(e);
+  }
+});
+
+$("btnImportPaste").addEventListener("click", () => {
+  window.api.openImport();
 });
 
 $("btnExportData").addEventListener("click", async () => {

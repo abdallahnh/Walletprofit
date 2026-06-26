@@ -38,9 +38,12 @@ function parseWalletTsv(text) {
   const rows = [];
 
   for (const line of lines) {
-    if (/^id\s+amount\s+reason/i.test(line) || /^id\tamount\treason/i.test(line)) continue;
+    if (/^id[\s,]+amount[\s,]+reason/i.test(line)) continue;
 
     let parts = line.split("\t").map((s) => s.trim());
+    if (parts.length < 5) {
+      parts = parseCsvLine(line);
+    }
     if (parts.length < 5) parts = line.split(/\s{2,}/).map((s) => s.trim());
     if (parts.length < 5) continue;
 
@@ -55,6 +58,36 @@ function parseWalletTsv(text) {
   }
 
   return rows;
+}
+
+function parseCsvLine(line) {
+  const parts = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === "," && !inQuotes) {
+      parts.push(current.trim());
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  parts.push(current.trim());
+  return parts;
+}
+
+function importWalletFromFile(filePath) {
+  const text = fs.readFileSync(filePath, "utf8");
+  return importWalletTsv(text);
 }
 
 function importWalletTsv(text) {
@@ -542,6 +575,7 @@ function detectBackupFormat(filePath) {
 
 module.exports = {
   importWalletTsv,
+  importWalletFromFile,
   getWalletConfig,
   saveWalletConfig,
   syncWallet,

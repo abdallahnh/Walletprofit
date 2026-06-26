@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld("api", {
 
   // Export / backup
   exportCsv: () => ipcRenderer.invoke("export:csv"),
+  importWalletFile: () => ipcRenderer.invoke("import:walletFile"),
+  importOrdersCsv: () => ipcRenderer.invoke("import:ordersCsv"),
   exportBackup: () => ipcRenderer.invoke("backup:export"),
   importBackup: () => ipcRenderer.invoke("backup:import"),
 
