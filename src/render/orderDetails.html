@@ -64,6 +64,29 @@
       margin-bottom: 8px;
     }
 
+    .item-card.adjusted {
+      background: #fff8e1;
+      border: 2px solid #e65100;
+    }
+
+    .adjustment-badge {
+      display: inline-block;
+      background: #e65100;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 999px;
+      margin-bottom: 6px;
+    }
+
+    .adjustment-note {
+      font-size: 12px;
+      color: #e65100;
+      font-weight: 600;
+      margin-top: 4px;
+    }
+
     .label { font-size: 13px; color: #666; }
     .value { font-weight: 600; margin-bottom: 6px; }
 
@@ -137,6 +160,36 @@
     .bill-table th { background: #f5f5f5; font-weight: 600; }
     .bill-table .num { text-align: right; font-variant-numeric: tabular-nums; }
     .bill-table tfoot td { background: #fafafa; font-weight: 700; }
+
+    .bill-cost-inp {
+      width: 88px;
+      max-width: 100%;
+      padding: 4px 6px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+      box-sizing: border-box;
+    }
+    .bill-cost-inp:focus {
+      outline: none;
+      border-color: #111;
+    }
+
+    .bill-edit-hint {
+      font-size: 11px;
+      color: #666;
+      margin: -8px 0 12px;
+    }
+
+    @media print {
+      .bill-cost-inp {
+        border: none;
+        padding: 0;
+        background: transparent;
+      }
+    }
 
     .bill-footer {
       margin-top: 20px;

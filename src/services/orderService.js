@@ -1,5 +1,7 @@
 const { getOrders, getOrderDetails } = require("./totersApi");
 const { recordOrderItemsToSales } = require("../db/sales");
+const { setOrderAdjustedFlag } = require("../db/orders");
+const { normalizeOrderDetailItems, countAdjustedItems } = require("./orderDetailItems");
 
 // We keep both an array and a map for fast lookup
 let cachedOrders = [];
@@ -83,16 +85,19 @@ async function loadDetailsByCode(code) {
   }
 
   const detailedOrder = details?.data?.orders || details;
+  const order_detail = normalizeOrderDetailItems(detailedOrder?.order_detail);
 
   const finalOrder = {
     ...detailedOrder,
     ...summary,
-    order_detail: detailedOrder?.order_detail || [],
+    order_detail,
   };
 
   // When we load an order, reconcile inventory and sales
   const salesSync = recordOrderItemsToSales(finalOrder);
   finalOrder._salesSync = salesSync;
+
+  setOrderAdjustedFlag(finalOrder.code, countAdjustedItems(order_detail));
 
   return finalOrder;
 }

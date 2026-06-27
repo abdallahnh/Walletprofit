@@ -474,14 +474,14 @@ th {
           marginAnalysis,
           supplierSummary
         ] = await Promise.all([
-          window.api.salesRevenueByPeriod(opts),
+          window.api.walletRevenueByPeriod(opts),
           window.api.salesTopProductsByRevenue({ ...opts, limit: 10 }),
           window.api.salesTopProductsByProfit({ ...opts, limit: 10 }),
           window.api.salesProfitMarginAnalysis({ ...opts, limit: 10 }),
           window.api.suppliersGetSummary({ supplierIds, from, to })
         ]);
 
-        // Calculate summary stats
+        // Wallet amounts are stored in LBP
         const totalRevenue = revenueData.reduce((sum, d) => sum + d.revenue, 0);
         const totalProfit = revenueData.reduce((sum, d) => sum + d.profit, 0);
         const totalOrders = revenueData.reduce((sum, d) => sum + d.order_count, 0);
@@ -491,20 +491,20 @@ th {
         // Update stats grid
         document.getElementById('statsGrid').innerHTML = `
           <div class="stat-card">
-            <div class="stat-value">${formatCurrency(totalRevenue)}</div>
-            <div class="stat-label">Total Revenue</div>
+            <div class="stat-value">${formatLbp(totalRevenue)}</div>
+            <div class="stat-label">Merchant Payout</div>
           </div>
           <div class="stat-card">
-            <div class="stat-value">${formatCurrency(totalProfit)}</div>
-            <div class="stat-label">Total Profit</div>
+            <div class="stat-value">${formatLbp(totalProfit)}</div>
+            <div class="stat-label">Net Profit</div>
           </div>
           <div class="stat-card">
             <div class="stat-value">${formatNumber(totalOrders)}</div>
-            <div class="stat-label">Total Orders</div>
+            <div class="stat-label">Wallet Orders</div>
           </div>
           <div class="stat-card">
             <div class="stat-value">${formatNumber(totalQuantity)}</div>
-            <div class="stat-label">Items Sold</div>
+            <div class="stat-label">Transaction Rows</div>
           </div>
           <div class="stat-card">
             <div class="stat-value">${avgMargin.toFixed(1)}%</div>
@@ -543,7 +543,7 @@ th {
         data: {
           labels: data.map(d => d.period),
           datasets: [{
-            label: 'Revenue',
+            label: 'Merchant Payout',
             data: data.map(d => d.revenue),
             borderColor: '#007bff',
             backgroundColor: 'rgba(0, 123, 255, 0.1)',
@@ -559,7 +559,7 @@ th {
               beginAtZero: true,
               ticks: {
                 callback: function(value) {
-                  return formatCurrency(value);
+                  return formatLbp(value);
                 }
               }
             }
@@ -568,7 +568,7 @@ th {
             tooltip: {
               callbacks: {
                 label: function(context) {
-                  return formatCurrency(context.parsed.y);
+                  return formatLbp(context.parsed.y);
                 }
               }
             }
@@ -589,7 +589,7 @@ th {
         data: {
           labels: data.map(d => d.period),
           datasets: [{
-            label: 'Profit',
+            label: 'Net Profit',
             data: data.map(d => d.profit),
             borderColor: '#28a745',
             backgroundColor: 'rgba(40, 167, 69, 0.1)',
@@ -605,7 +605,7 @@ th {
               beginAtZero: true,
               ticks: {
                 callback: function(value) {
-                  return formatCurrency(value);
+                  return formatLbp(value);
                 }
               }
             }
@@ -614,7 +614,7 @@ th {
             tooltip: {
               callbacks: {
                 label: function(context) {
-                  return formatCurrency(context.parsed.y);
+                  return formatLbp(context.parsed.y);
                 }
               }
             }
@@ -642,7 +642,7 @@ th {
               yAxisID: 'y'
             },
             {
-              label: 'Quantity Sold',
+              label: 'Transaction Rows',
               data: data.map(d => d.quantity_sold),
               backgroundColor: '#e83e8c',
               yAxisID: 'y1'
@@ -801,12 +801,11 @@ th {
       `).join('');
     }
 
-    // Set default date range (last 30 days)
+    // Default date range: Jan 1 of current year through today
     const today = new Date();
-    const thirtyDaysAgo = new Date(today);
-    thirtyDaysAgo.setDate(today.getDate() - 30);
+    const year = today.getFullYear();
 
-    dateFromEl.value = thirtyDaysAgo.toISOString().split('T')[0];
+    dateFromEl.value = `${year}-01-01`;
     dateToEl.value = today.toISOString().split('T')[0];
 
     // Initial load

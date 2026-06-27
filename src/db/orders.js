@@ -1,8 +1,9 @@
 const path = require("path");
 const fs = require("fs");
 const { getDb, getDbPath } = require("./database");
-const { getWalletConfig, normalizeType } = require("./wallet");
+const { getWalletConfig, normalizeType, grossAmountToMerchant } = require("./wallet");
 const { getOrCreateSupplier } = require("./suppliers");
+const { normalizeOrderDetailItems } = require("../services/orderDetailItems");
 
 function computeOrders() {
   const db = getDb();
@@ -52,7 +53,7 @@ function computeOrders() {
     agg.row_count += 1;
     if (r.created_at) agg.dates.add(r.created_at);
 
-    if (ntype === "gross") agg.gross += Math.abs(amt);
+    if (ntype === "gross") agg.gross += grossAmountToMerchant(amt);
     else if (ntype === "service_fee") agg.service_fee += amt;
     else if (ntype === "vat") agg.vat += amt;
     else if (ntype === "incentive") agg.incentive += Math.abs(amt);
@@ -63,6 +64,7 @@ function computeOrders() {
     .prepare(
       `
     SELECT om.order_code, om.supplier_cost, om.supplier_paid, om.supplier_id,
+           om.has_adjusted_items, om.adjusted_items_count,
            s.name AS supplier_name, s.color AS supplier_color, s.phone AS supplier_phone
     FROM order_meta om
     LEFT JOIN suppliers s ON s.id = om.supplier_id
@@ -80,6 +82,8 @@ function computeOrders() {
       supplier_name: "",
       supplier_color: "",
       supplier_phone: "",
+      has_adjusted_items: 0,
+      adjusted_items_count: 0,
     };
 
     const incentive = agg.incentive || 0;
@@ -120,6 +124,8 @@ function computeOrders() {
       transaction_types: typeList.join(","),
       missing_types: missingTypes.join(","),
       has_missing_types: missingTypes.length > 0 ? 1 : 0,
+      has_adjusted_items: meta.has_adjusted_items ? 1 : 0,
+      adjusted_items_count: Number(meta.adjusted_items_count || 0),
     });
   }
 
@@ -139,6 +145,71 @@ function getOrdersReconciliation() {
   return orders;
 }
 
+function orderDateStr(o) {
+  return String(o.latest_date || o.primary_date || "").slice(0, 10);
+}
+
+function filterWalletOrders(orders, opts = {}) {
+  const { from, to, supplierIds } = opts;
+  const ids = Array.isArray(supplierIds)
+    ? supplierIds.map(Number).filter((id) => id > 0)
+    : null;
+
+  return orders.filter((o) => {
+    const d = orderDateStr(o);
+    if (from && d && d < from) return false;
+    if (to && d && d > to) return false;
+    if (ids?.length && (!o.supplier_id || !ids.includes(o.supplier_id))) return false;
+    return true;
+  });
+}
+
+function periodKeyFromDate(dateStr, period) {
+  if (!dateStr) return null;
+  if (period === "month") return dateStr.slice(0, 7);
+  if (period === "week") {
+    const d = new Date(`${dateStr}T12:00:00`);
+    if (Number.isNaN(d.getTime())) return dateStr;
+    const year = d.getFullYear();
+    const start = new Date(year, 0, 1);
+    const week = Math.floor((d - start) / 604800000);
+    return `${year}-${String(week).padStart(2, "0")}`;
+  }
+  return dateStr;
+}
+
+function getWalletRevenueByPeriod(opts = {}) {
+  const { period = "day" } = opts;
+  const { orders } = computeOrders();
+  const filtered = filterWalletOrders(orders, opts);
+  const byPeriod = new Map();
+
+  for (const o of filtered) {
+    const key = periodKeyFromDate(orderDateStr(o), period);
+    if (!key) continue;
+
+    if (!byPeriod.has(key)) {
+      byPeriod.set(key, {
+        period: key,
+        revenue: 0,
+        cost: 0,
+        profit: 0,
+        quantity_sold: 0,
+        order_count: 0,
+      });
+    }
+
+    const row = byPeriod.get(key);
+    row.revenue += o.merchant_payout || 0;
+    row.cost += o.supplier_cost || 0;
+    row.profit += o.net_profit || 0;
+    row.order_count += 1;
+    row.quantity_sold += o.row_count || 0;
+  }
+
+  return Array.from(byPeriod.values()).sort((a, b) => a.period.localeCompare(b.period));
+}
+
 function getSupplierSummary(opts = {}) {
   const supplierIds = Array.isArray(opts.supplierIds)
     ? opts.supplierIds.map(Number).filter((id) => id > 0)
@@ -146,17 +217,11 @@ function getSupplierSummary(opts = {}) {
   const { from, to } = opts;
 
   const { orders } = computeOrders();
+  const filtered = filterWalletOrders(orders, { from, to, supplierIds });
 
   const bySupplier = new Map();
 
-  for (const o of orders) {
-    if (from && o.primary_date && o.primary_date < from) continue;
-    if (to && o.primary_date && o.primary_date > to) continue;
-
-    if (supplierIds && supplierIds.length > 0) {
-      if (!o.supplier_id || !supplierIds.includes(o.supplier_id)) continue;
-    }
-
+  for (const o of filtered) {
     const key = o.supplier_id || 0;
     const name = o.supplier_name || "(Unassigned)";
 
@@ -275,6 +340,27 @@ function upsertOrderMeta({
   ).run(order_code, cost, paid, resolvedSupplierId);
 
   return { ok: true, supplier_id: resolvedSupplierId };
+}
+
+function setOrderAdjustedFlag(orderCode, adjustedCount) {
+  if (!orderCode) return { ok: false, error: "Missing order_code" };
+
+  const count = Math.max(0, Number(adjustedCount) || 0);
+  const hasAdjusted = count > 0 ? 1 : 0;
+  const db = getDb();
+
+  db.prepare(
+    `
+    INSERT INTO order_meta(order_code, has_adjusted_items, adjusted_items_count, updated_at)
+    VALUES(?, ?, ?, datetime('now'))
+    ON CONFLICT(order_code) DO UPDATE SET
+      has_adjusted_items=excluded.has_adjusted_items,
+      adjusted_items_count=excluded.adjusted_items_count,
+      updated_at=datetime('now')
+  `
+  ).run(orderCode, hasAdjusted, count);
+
+  return { ok: true, has_adjusted_items: hasAdjusted, adjusted_items_count: count };
 }
 
 function resetSupplierMeta() {
@@ -420,7 +506,7 @@ function importOrdersCsvFromFile(filePath) {
 }
 
 function enrichBillLinesFromApiOrder(orderDetail, supplierCostLbp, usdToLbpRate) {
-  const items = orderDetail || [];
+  const items = normalizeOrderDetailItems(orderDetail);
   const supplierCostUsd = Number(supplierCostLbp || 0) / Number(usdToLbpRate || 90000);
   const totalSaleLbp = items.reduce((sum, d) => sum + Number(d.total || 0), 0);
 
@@ -523,8 +609,10 @@ module.exports = {
   computeOrders,
   getOrdersReconciliation,
   getSupplierSummary,
+  getWalletRevenueByPeriod,
   getTotals,
   upsertOrderMeta,
+  setOrderAdjustedFlag,
   resetSupplierMeta,
   exportOrdersCsv,
   importOrdersCsv,

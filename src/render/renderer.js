@@ -38,6 +38,7 @@ let summarySortKey = "supplier_name";
 let summarySortDir = "asc";
 let supplierFilter = null;
 let supplierColorById = new Map();
+let selectedOrderCode = null;
 
 const COLUMN_DEFS = [
   { key: "view", label: "View" },
@@ -388,18 +389,28 @@ function getSupplierIdFromRow(orderCode) {
   return Number(el.value) || null;
 }
 
+function selectRow(orderCode) {
+  selectedOrderCode = orderCode || null;
+  tbody.querySelectorAll("tr.row-selected").forEach((tr) => tr.classList.remove("row-selected"));
+  if (!orderCode) return;
+  const tr = tbody.querySelector(`tr[data-order="${CSS.escape(orderCode)}"]`);
+  if (tr) tr.classList.add("row-selected");
+}
+
 function renderRows(rows) {
   tbody.innerHTML = "";
 
   for (const r of rows) {
     const tr = document.createElement("tr");
+    const negativeProfit = Number(r.net_profit || 0) < 0;
+    tr.setAttribute("data-order", r.order_code);
 
     tr.innerHTML = `
       <td data-col="view">
   <button class="view-btn" data-code="${r.order_code}">
     View
   </button></td>
-      <td data-col="order">${r.order_code}</td>
+      <td data-col="order" class="${negativeProfit ? "order-code-negative" : ""}">${r.order_code}${r.has_adjusted_items ? `<span class="order-adjusted-mark" title="${Number(r.adjusted_items_count || 0)} adjusted item(s)">✦</span>` : ""}</td>
       <td data-col="supplier">
         <select
           class="sel-supplier"
@@ -437,11 +448,16 @@ function renderRows(rows) {
   }
 
   document.querySelectorAll(".view-btn").forEach(btn => {
-  btn.addEventListener("click", () => {
+  btn.addEventListener("click", async (e) => {
+    e.stopPropagation();
     const code = btn.getAttribute("data-code");
-    window.api.openOrder(code);
+    selectRow(code);
+    await window.api.openOrder(code);
+    await refresh();
   });
 });
+
+  selectRow(selectedOrderCode);
 
   // wire inputs
   tbody.querySelectorAll("select[data-kind='supplier']").forEach((sel) => {
@@ -868,6 +884,12 @@ $("btnSyncSales").addEventListener("click", async () => {
     statusEl.textContent = "";
     setError(e);
   }
+});
+
+tbody.addEventListener("click", (e) => {
+  const tr = e.target.closest("tr[data-order]");
+  if (!tr) return;
+  selectRow(tr.getAttribute("data-order"));
 });
 
 // Initial load

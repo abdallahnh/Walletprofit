@@ -1,6 +1,7 @@
 const { getDb } = require("./database");
 const { findProductByBarcode } = require("./products");
 const { getWalletConfig, normalizeType } = require("./wallet");
+const { normalizeOrderDetailItems } = require("../services/orderDetailItems");
 
 function getOrderAdjustmentsUsd(db, orderCode, lbpToUsdRate) {
   if (!orderCode) return { serviceVatUsd: 0, incentiveUsd: 0 };
@@ -67,7 +68,7 @@ function getEffectiveProductCostUsd(db, productId, asOf, fallbackCostUsd) {
 
 function recordOrderItemsToSales(order) {
   const db = getDb();
-  const items = order.order_detail || [];
+  const items = normalizeOrderDetailItems(order.order_detail);
   if (!items.length) {
     return {
       order_code: order?.code || null,

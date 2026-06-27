@@ -15,6 +15,121 @@ function formatAmount(amount, currency) {
   return billExport.formatDisplayAmount(amount, currency);
 }
 
+function getBillCurrency() {
+  return currentBillData?.display_currency || "USD";
+}
+
+function getCostInputStep(currency) {
+  return currency === "USD" ? "0.01" : "1";
+}
+
+function roundDisplayAmount(value, currency) {
+  const n = Number(value) || 0;
+  if (currency === "LBP") return Math.round(n);
+  return Math.round(n * 100) / 100;
+}
+
+function recalcBillTotals(lines, currency, usdToLbpRate) {
+  const totalDisplay = roundDisplayAmount(
+    (lines || []).reduce((sum, l) => sum + Number(l.line_cost_display || 0), 0),
+    currency
+  );
+  const totalUsd =
+    currency === "LBP"
+      ? totalDisplay / Number(usdToLbpRate || 90000)
+      : totalDisplay;
+  return { totalDisplay, totalUsd };
+}
+
+function syncBillEdits() {
+  if (!currentBillData) return null;
+
+  const currency = getBillCurrency();
+  const rate = Number(currentBillData.usd_to_lbp_rate || 90000);
+  const tbody = document.querySelector("#billContent .bill-table tbody");
+  if (!tbody) return currentBillData;
+
+  const lines = currentBillData.lines || [];
+
+  tbody.querySelectorAll("tr[data-line-index]").forEach((tr) => {
+    const idx = Number(tr.getAttribute("data-line-index"));
+    if (!Number.isFinite(idx) || !lines[idx]) return;
+
+    const line = lines[idx];
+    const qty = Number(line.quantity || 0);
+    const unitInp = tr.querySelector("[data-bill-unit]");
+    const lineInp = tr.querySelector("[data-bill-line]");
+
+    const unitDisplay = roundDisplayAmount(unitInp?.value, currency);
+    const lineDisplay = roundDisplayAmount(lineInp?.value, currency);
+
+    line.unit_cost_display = unitDisplay;
+    line.line_cost_display = lineDisplay;
+
+    if (currency === "LBP") {
+      line.unit_cost_usd = unitDisplay / rate;
+      line.line_cost_usd = lineDisplay / rate;
+    } else {
+      line.unit_cost_usd = unitDisplay;
+      line.line_cost_usd = lineDisplay;
+    }
+  });
+
+  const { totalDisplay, totalUsd } = recalcBillTotals(lines, currency, rate);
+  currentBillData.lines = lines;
+  currentBillData.total_cost_display = totalDisplay;
+  currentBillData.total_cost_usd = totalUsd;
+
+  const totalEl = document.getElementById("billTotalDue");
+  if (totalEl) totalEl.textContent = formatAmount(totalDisplay, currency);
+
+  return currentBillData;
+}
+
+function getBillDataForAction() {
+  return syncBillEdits() || currentBillData;
+}
+
+function wireBillCostInputs() {
+  const currency = getBillCurrency();
+  const tbody = document.querySelector("#billContent .bill-table tbody");
+  if (!tbody) return;
+
+  tbody.querySelectorAll("[data-bill-unit]").forEach((inp) => {
+    inp.addEventListener("input", () => {
+      const tr = inp.closest("tr");
+      const idx = Number(tr?.getAttribute("data-line-index"));
+      const line = currentBillData?.lines?.[idx];
+      if (!line) return;
+
+      const qty = Number(line.quantity || 0);
+      const unit = roundDisplayAmount(inp.value, currency);
+      const lineInp = tr.querySelector("[data-bill-line]");
+      if (lineInp && qty > 0) {
+        lineInp.value = String(roundDisplayAmount(unit * qty, currency));
+      }
+      syncBillEdits();
+    });
+  });
+
+  tbody.querySelectorAll("[data-bill-line]").forEach((inp) => {
+    inp.addEventListener("input", () => {
+      const tr = inp.closest("tr");
+      const idx = Number(tr?.getAttribute("data-line-index"));
+      const line = currentBillData?.lines?.[idx];
+      if (!line) return;
+
+      const qty = Number(line.quantity || 0);
+      const lineCost = roundDisplayAmount(inp.value, currency);
+      const unitInp = tr.querySelector("[data-bill-unit]");
+      if (unitInp && qty > 0) {
+        unitInp.value = String(roundDisplayAmount(lineCost / qty, currency));
+      }
+      syncBillEdits();
+    });
+  });
+}
+
 function getCustomerPhones(order) {
   const client = order.client || order.customer || {};
   const address = order.address || {};
@@ -41,26 +156,44 @@ function formatPhoneLine(label, phone, countryCode) {
   return `<div><b>${label}:</b> <a href="tel:${display.replace(/\s/g, "")}">${escapeHtml(display)}</a></div>`;
 }
 
-function renderBill(billData) {
+function renderBill(billData, opts = {}) {
   if (!billData) return;
 
+  const editable = opts.editable !== false;
   const currency = billData.display_currency || "USD";
   const statusClass = billData.supplier_paid ? "status-paid" : "status-unpaid";
   const statusText = billData.supplier_paid ? "PAID" : "UNPAID";
+  const step = getCostInputStep(currency);
+  const lines = billData.lines || [];
 
-  const lineRows = (billData.lines || [])
-    .map(
-      (l) => `
-    <tr>
+  const lineRows = lines
+    .map((l, idx) => {
+      const unitVal = roundDisplayAmount(l.unit_cost_display, currency);
+      const lineVal = roundDisplayAmount(l.line_cost_display, currency);
+
+      const unitCell = editable
+        ? `<input type="number" class="bill-cost-inp" data-bill-unit min="0" step="${step}" value="${unitVal}" />`
+        : formatAmount(unitVal, currency);
+
+      const lineCell = editable
+        ? `<input type="number" class="bill-cost-inp" data-bill-line min="0" step="${step}" value="${lineVal}" />`
+        : formatAmount(lineVal, currency);
+
+      return `
+    <tr data-line-index="${idx}">
       <td>${escapeHtml(l.item_name)}</td>
       <td>${escapeHtml(l.barcode)}</td>
       <td>${escapeHtml(l.brand || "")}</td>
       <td class="num">${l.quantity}</td>
-      <td class="num">${formatAmount(l.unit_cost_display, currency)}</td>
-      <td class="num">${formatAmount(l.line_cost_display, currency)}</td>
-    </tr>`
-    )
+      <td class="num">${unitCell}</td>
+      <td class="num">${lineCell}</td>
+    </tr>`;
+    })
     .join("");
+
+  const editHint = editable && lines.length
+    ? `<p class="bill-edit-hint">You can edit Unit Cost and Line Cost below before printing or sending.</p>`
+    : "";
 
   document.getElementById("billContent").innerHTML = `
     <div class="bill-header">
@@ -81,6 +214,8 @@ function renderBill(billData) {
       <div class="${statusClass}">${statusText}</div>
     </div>
 
+    ${editHint}
+
     <table class="bill-table">
       <thead>
         <tr>
@@ -98,7 +233,7 @@ function renderBill(billData) {
       <tfoot>
         <tr>
           <td colspan="5" class="num">TOTAL DUE TO SUPPLIER</td>
-          <td class="num">${formatAmount(billData.total_cost_display, currency)}</td>
+          <td class="num" id="billTotalDue">${formatAmount(billData.total_cost_display, currency)}</td>
         </tr>
       </tfoot>
     </table>
@@ -107,6 +242,8 @@ function renderBill(billData) {
       Generated on ${new Date().toLocaleString()} — Please verify quantities and amounts before payment.
     </div>
   `;
+
+  if (editable) wireBillCostInputs();
 }
 
 function openBillModal() {
@@ -120,6 +257,7 @@ function openBillModal() {
 }
 
 function closeBillModal() {
+  syncBillEdits();
   document.getElementById("billBackdrop").classList.remove("open");
   document.getElementById("billModal").classList.remove("open");
 }
@@ -129,12 +267,17 @@ document.getElementById("btnCloseBill").addEventListener("click", closeBillModal
 document.getElementById("billBackdrop").addEventListener("click", closeBillModal);
 
 document.getElementById("btnPrintBill").addEventListener("click", () => {
+  const data = getBillDataForAction();
+  if (!data) return;
+  renderBill(data, { editable: false });
   window.print();
+  renderBill(data, { editable: true });
 });
 
 document.getElementById("btnCopyBill").addEventListener("click", async () => {
-  if (!currentBillData) return;
-  const text = billExport.buildBillPlainText(currentBillData);
+  const data = getBillDataForAction();
+  if (!data) return;
+  const text = billExport.buildBillPlainText(data);
   try {
     await navigator.clipboard.writeText(text);
     alert("Bill copied to clipboard. Paste it in WhatsApp.");
@@ -144,16 +287,18 @@ document.getElementById("btnCopyBill").addEventListener("click", async () => {
 });
 
 document.getElementById("btnWhatsAppBill").addEventListener("click", async () => {
-  if (!currentBillData) return;
-  const res = await ipcRenderer.invoke("bill:openWhatsApp", currentBillData);
+  const data = getBillDataForAction();
+  if (!data) return;
+  const res = await ipcRenderer.invoke("bill:openWhatsApp", data);
   if (!res?.ok) {
     alert(res?.error || "Could not open WhatsApp");
   }
 });
 
 document.getElementById("btnExportExcel").addEventListener("click", async () => {
-  if (!currentBillData) return;
-  const res = await ipcRenderer.invoke("bill:exportExcel", currentBillData);
+  const data = getBillDataForAction();
+  if (!data) return;
+  const res = await ipcRenderer.invoke("bill:exportExcel", data);
   if (res?.canceled) return;
   if (!res?.ok) {
     alert(res?.error || "Export failed");
@@ -163,8 +308,9 @@ document.getElementById("btnExportExcel").addEventListener("click", async () => 
 });
 
 document.getElementById("btnExportWord").addEventListener("click", async () => {
-  if (!currentBillData) return;
-  const res = await ipcRenderer.invoke("bill:exportWord", currentBillData);
+  const data = getBillDataForAction();
+  if (!data) return;
+  const res = await ipcRenderer.invoke("bill:exportWord", data);
   if (res?.canceled) return;
   if (!res?.ok) {
     alert(res?.error || "Export failed");
@@ -226,9 +372,9 @@ ipcRenderer.on("order-data", (_, payload) => {
     : "";
 
   document.getElementById("orderSummary").innerHTML = `
-    <div><b>Total:</b> ${order.total}</div>
-    <div><b>Items Total:</b> ${order.items_total}</div>
-    <div><b>Delivery:</b> ${order.delivery_charge}</div>
+    <div><b>Total:</b> ${Number(order.final_total || order.total || 0).toLocaleString()}</div>
+    <div><b>Items Total:</b> ${Number(order.final_cost || order.items_total || 0).toLocaleString()}</div>
+    <div><b>Delivery:</b> ${order.delivery_charge ?? "-"}</div>
     <div><b>Tip:</b> ${order.tip}</div>
     <div><b>Payment:</b> ${order.payment_type}</div>
     <div><b>Created:</b> ${order.created_at}</div>
@@ -239,22 +385,44 @@ ipcRenderer.on("order-data", (_, payload) => {
   container.innerHTML = "";
 
   const items = order.order_detail || [];
+  const adjustedCount = items.filter((d) => d.was_adjusted).length;
+
+  if (adjustedCount > 0) {
+    const note = document.createElement("div");
+    note.className = "adjustment-note";
+    note.style.marginBottom = "12px";
+    note.textContent = `${adjustedCount} item(s) adjusted — quantities and totals reflect final values after shopper changes.`;
+    container.appendChild(note);
+  }
 
   items.forEach((detail) => {
     const item = detail.item || {};
     const div = document.createElement("div");
-    div.className = "item-card";
+    div.className = detail.was_adjusted ? "item-card adjusted" : "item-card";
 
     const image =
       item.image || (item.imgs && item.imgs[0]) || "https://via.placeholder.com/150";
 
+    const qtyLine = detail.was_adjusted
+      ? `<div class="label">Qty: <s>${detail.ordered_quantity}</s> → <b>${detail.quantity}</b></div>`
+      : `<div class="label">Qty: ${detail.quantity}</div>`;
+
+    const totalLine = detail.was_adjusted
+      ? `<div class="label">Total: <s>${detail.ordered_total?.toLocaleString()}</s> → <b>${Number(detail.total || 0).toLocaleString()}</b></div>`
+      : `<div class="label">Total: ${Number(detail.total || 0).toLocaleString()}</div>`;
+
+    const badge = detail.was_adjusted
+      ? `<div class="adjustment-badge">Adjusted</div>`
+      : "";
+
     div.innerHTML = `
+      ${badge}
       <img src="${escapeHtml(image)}" alt="" />
-      <div class="value">${escapeHtml(item.ref || "-")}</div>
+      <div class="value">${escapeHtml(item.ref || detail.item_ref || "-")}</div>
       <div class="label">Barcode: ${escapeHtml(item.barcode || "-")}</div>
-      <div class="label">Qty: ${detail.quantity}</div>
-      <div class="label">Unit Price: ${detail.item_price}</div>
-      <div class="label">Total: ${detail.total}</div>
+      ${qtyLine}
+      <div class="label">Unit Price: ${Number(detail.item_price || 0).toLocaleString()}</div>
+      ${totalLine}
     `;
 
     container.appendChild(div);

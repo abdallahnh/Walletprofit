@@ -31,6 +31,11 @@ function normalizeType(type) {
   return "other";
 }
 
+/** Wallet gross sign: negative = collected for merchant, positive = refund/deduction to client. */
+function grossAmountToMerchant(amt) {
+  return -(Number(amt) || 0);
+}
+
 function parseWalletTsv(text) {
   const lines = (text || "")
     .split(/\r?\n/)
@@ -353,12 +358,14 @@ function importBackupData(data, { replace = false } = {}) {
   `);
 
   const insertMeta = db.prepare(`
-    INSERT INTO order_meta(order_code, supplier_cost, supplier_paid, supplier_id, updated_at)
-    VALUES(@order_code, @supplier_cost, @supplier_paid, @supplier_id, datetime('now'))
+    INSERT INTO order_meta(order_code, supplier_cost, supplier_paid, supplier_id, has_adjusted_items, adjusted_items_count, updated_at)
+    VALUES(@order_code, @supplier_cost, @supplier_paid, @supplier_id, @has_adjusted_items, @adjusted_items_count, datetime('now'))
     ON CONFLICT(order_code) DO UPDATE SET
       supplier_cost=excluded.supplier_cost,
       supplier_paid=excluded.supplier_paid,
       supplier_id=excluded.supplier_id,
+      has_adjusted_items=excluded.has_adjusted_items,
+      adjusted_items_count=excluded.adjusted_items_count,
       updated_at=datetime('now')
   `);
 
@@ -465,6 +472,8 @@ function importBackupData(data, { replace = false } = {}) {
         supplier_cost: Math.trunc(m.supplier_cost || 0),
         supplier_paid: m.supplier_paid ? 1 : 0,
         supplier_id: m.supplier_id ?? null,
+        has_adjusted_items: m.has_adjusted_items ? 1 : 0,
+        adjusted_items_count: Math.trunc(m.adjusted_items_count || 0),
       });
     }
 
@@ -592,5 +601,6 @@ module.exports = {
   BACKUP_SCHEMA_VERSION,
   extractOrderCode,
   normalizeType,
+  grossAmountToMerchant,
 };
 

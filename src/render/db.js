@@ -344,7 +344,7 @@ function computeOrders() {
     agg.row_count += 1;
     if (r.created_at) agg.dates.add(r.created_at);
 
-    if (ntype === "gross") agg.gross += Math.abs(amt);
+    if (ntype === "gross") agg.gross += -(Number(amt) || 0);
     else if (ntype === "service_fee") agg.service_fee += amt;
     else if (ntype === "vat") agg.vat += amt;
     else if (ntype === "incentive") agg.incentive += Math.abs(amt);

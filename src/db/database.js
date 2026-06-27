@@ -200,6 +200,12 @@ function ensureOrderMetaColumns(dbConn) {
   if (!existing.has("supplier_id")) {
     dbConn.exec("ALTER TABLE order_meta ADD COLUMN supplier_id INTEGER REFERENCES suppliers(id)");
   }
+  if (!existing.has("has_adjusted_items")) {
+    dbConn.exec("ALTER TABLE order_meta ADD COLUMN has_adjusted_items INTEGER DEFAULT 0");
+  }
+  if (!existing.has("adjusted_items_count")) {
+    dbConn.exec("ALTER TABLE order_meta ADD COLUMN adjusted_items_count INTEGER DEFAULT 0");
+  }
 }
 
 function ensureProductsColumns(dbConn) {

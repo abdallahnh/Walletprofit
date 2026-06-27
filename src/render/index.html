@@ -51,6 +51,56 @@ td.num, th.num {
 }
 
 .view-btn { padding: 8px 12px; border-radius: 12px; background:#eee; cursor:pointer; }
+
+#table tbody tr {
+  cursor: pointer;
+}
+#table tbody tr.row-selected {
+  background: #e3f2fd;
+}
+#table tbody tr.row-selected td {
+  background: #e3f2fd;
+}
+#table .order-code-negative {
+  color: #b00020;
+  font-weight: 600;
+}
+#table th[data-col="paid"],
+#table td[data-col="paid"] {
+  width: 36px;
+  max-width: 36px;
+  text-align: center;
+  padding-left: 4px;
+  padding-right: 4px;
+}
+#table td[data-col="paid"] input[type="checkbox"] {
+  margin: 0;
+  vertical-align: middle;
+}
+#table th[data-col="view"],
+#table td[data-col="view"] {
+  width: 56px;
+  max-width: 56px;
+  text-align: center;
+  padding-left: 4px;
+  padding-right: 4px;
+}
+#table td[data-col="view"] .view-btn {
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+#table .order-adjusted-mark {
+  display: inline-block;
+  margin-left: 6px;
+  color: #e65100;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  vertical-align: middle;
+  cursor: help;
+}
+
     .inp { width: 120px; padding:6px; border:1px solid #ddd; border-radius:8px; font-family: ui-monospace, Menlo, Monaco, Consolas, monospace; font-size: 12px; }
 
     /* Menu Styles */

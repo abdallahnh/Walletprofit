@@ -51,6 +51,7 @@ contextBridge.exposeInMainWorld("api", {
   // Sales reports
   salesReport: (opts) => ipcRenderer.invoke("sales:report", opts || {}),
   salesRevenueByPeriod: (opts) => ipcRenderer.invoke("sales:revenueByPeriod", opts || {}),
+  walletRevenueByPeriod: (opts) => ipcRenderer.invoke("orders:walletRevenueByPeriod", opts || {}),
   salesTopProductsByRevenue: (opts) => ipcRenderer.invoke("sales:topProductsByRevenue", opts || {}),
   salesTopProductsByProfit: (opts) => ipcRenderer.invoke("sales:topProductsByProfit", opts || {}),
   salesProfitMarginAnalysis: (opts) => ipcRenderer.invoke("sales:profitMarginAnalysis", opts || {}),

@@ -713,6 +713,10 @@ ipcMain.handle("sales:revenueByPeriod", (_evt, opts) => {
   return salesDb.getRevenueByPeriod(opts || {});
 });
 
+ipcMain.handle("orders:walletRevenueByPeriod", (_evt, opts) => {
+  return ordersDb.getWalletRevenueByPeriod(opts || {});
+});
+
 ipcMain.handle("sales:topProductsByRevenue", (_evt, opts) => {
   return salesDb.getTopProductsByRevenue(opts || {});
 });
