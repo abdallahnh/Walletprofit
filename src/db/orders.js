@@ -1,7 +1,7 @@
 const path = require("path");
 const fs = require("fs");
 const { getDb, getDbPath } = require("./database");
-const { getWalletConfig } = require("./wallet");
+const { getWalletConfig, normalizeType } = require("./wallet");
 const { getOrCreateSupplier } = require("./suppliers");
 
 function computeOrders() {
