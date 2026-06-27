@@ -12,6 +12,7 @@ const adminDb = require("../db/admin");
 const suppliersDb = require("../db/suppliers");
 const billExport = require("../db/billExport");
 const transactionsDb = require("../db/transactions");
+const companyExpensesDb = require("../db/companyExpenses");
 
 const logger = require("../utils/logger");
 
@@ -315,6 +316,47 @@ ipcMain.handle("open-transactions", () => {
   });
 
   win.loadFile(transactionsPath);
+});
+
+ipcMain.handle("companyExpenses:getCategories", async () => {
+  return companyExpensesDb.DEFAULT_CATEGORIES;
+});
+
+ipcMain.handle("companyExpenses:getAll", async (_evt, opts) => {
+  return companyExpensesDb.getAll(opts || {});
+});
+
+ipcMain.handle("companyExpenses:getSummary", async (_evt, opts) => {
+  return companyExpensesDb.getSummary(opts || {});
+});
+
+ipcMain.handle("companyExpenses:create", async (_evt, payload) => {
+  return companyExpensesDb.createExpense(payload || {});
+});
+
+ipcMain.handle("companyExpenses:update", async (_evt, payload) => {
+  return companyExpensesDb.updateExpense(payload || {});
+});
+
+ipcMain.handle("companyExpenses:delete", async (_evt, id) => {
+  return companyExpensesDb.deleteExpense(id);
+});
+
+ipcMain.handle("open-company-expenses", () => {
+  const { preloadJs } = resolveRendererPaths();
+  const pagePath = path.join(app.getAppPath(), "src", "render", "companyExpenses.html");
+
+  const win = new BrowserWindow({
+    width: 1100,
+    height: 760,
+    webPreferences: {
+      preload: preloadJs,
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  win.loadFile(pagePath);
 });
 
 ipcMain.handle("backup:export", async () => {

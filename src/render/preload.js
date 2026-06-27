@@ -20,6 +20,13 @@ contextBridge.exposeInMainWorld("api", {
   openSuppliers: () => ipcRenderer.invoke("open-suppliers"),
   openSettlements: () => ipcRenderer.invoke("open-settlements"),
   openTransactions: () => ipcRenderer.invoke("open-transactions"),
+  openCompanyExpenses: () => ipcRenderer.invoke("open-company-expenses"),
+  companyExpensesGetCategories: () => ipcRenderer.invoke("companyExpenses:getCategories"),
+  companyExpensesGetAll: (opts) => ipcRenderer.invoke("companyExpenses:getAll", opts || {}),
+  companyExpensesGetSummary: (opts) => ipcRenderer.invoke("companyExpenses:getSummary", opts || {}),
+  companyExpensesCreate: (payload) => ipcRenderer.invoke("companyExpenses:create", payload),
+  companyExpensesUpdate: (payload) => ipcRenderer.invoke("companyExpenses:update", payload),
+  companyExpensesDelete: (id) => ipcRenderer.invoke("companyExpenses:delete", id),
   transactionsGetSettlements: () => ipcRenderer.invoke("transactions:getSettlements"),
   transactionsGetAll: (opts) => ipcRenderer.invoke("transactions:getAll", opts || {}),
 

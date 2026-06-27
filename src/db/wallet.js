@@ -31,6 +31,16 @@ function normalizeType(type) {
   return "other";
 }
 
+function isWrongMissingReason(reason) {
+  return /wrong\s*\/\s*missing/i.test(String(reason || ""));
+}
+
+/** Classify a wallet row for display/filtering (includes wrong/missing adjustments). */
+function classifyTransaction(type, reason) {
+  if (isWrongMissingReason(reason)) return "wrong_missing";
+  return normalizeType(type);
+}
+
 /** Wallet gross sign: negative = collected for merchant, positive = refund/deduction to client. */
 function grossAmountToMerchant(amt) {
   return -(Number(amt) || 0);
@@ -255,6 +265,7 @@ function collectBackupData() {
     product_price_history: db
       .prepare("SELECT * FROM product_price_history ORDER BY id ASC")
       .all(),
+    company_expenses: db.prepare("SELECT * FROM company_expenses ORDER BY id ASC").all(),
     walletConfig: getWalletConfig(),
     config: db.prepare("SELECT * FROM config ORDER BY key ASC").all(),
   };
@@ -601,6 +612,8 @@ module.exports = {
   BACKUP_SCHEMA_VERSION,
   extractOrderCode,
   normalizeType,
+  classifyTransaction,
+  isWrongMissingReason,
   grossAmountToMerchant,
 };
 

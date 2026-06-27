@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Azone Company Expenses</title>
+<style>
+body {
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  margin: 16px;
+  background: #fff;
+}
+h1 { font-size: 18px; margin: 0 0 8px; }
+.muted { color: #666; font-size: 12px; margin-bottom: 12px; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0; align-items: center; }
+button {
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.primary { background: #111; color: #fff; }
+.secondary { background: #eee; }
+.danger { background: #dc3545; color: #fff; }
+.inp {
+  padding: 8px 10px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 12px;
+  min-width: 120px;
+}
+.summary {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+.summary .card {
+  border: 1px solid #eee;
+  border-radius: 12px;
+  padding: 12px 16px;
+  min-width: 160px;
+}
+.summary .label { font-size: 11px; color: #666; margin-bottom: 4px; }
+.summary .value { font-size: 18px; font-weight: 600; }
+.wrap {
+  overflow: auto;
+  max-height: calc(100vh - 340px);
+  border: 1px solid #eee;
+  border-radius: 12px;
+}
+table { width: 100%; border-collapse: collapse; }
+th, td {
+  border-bottom: 1px solid #e6e6e6;
+  padding: 10px 8px;
+  font-size: 12px;
+  text-align: left;
+  vertical-align: middle;
+}
+th { position: sticky; top: 0; background: #fafafa; }
+td.num { text-align: right; white-space: nowrap; }
+tfoot td {
+  font-weight: 700;
+  background: #f5f5f5;
+  border-top: 2px solid #ddd;
+}
+.error { color: #b00020; font-size: 12px; margin: 8px 0; }
+.msg { color: #155724; font-size: 12px; margin: 8px 0; }
+.form-panel {
+  border: 1px solid #eee;
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 12px;
+  background: #fafafa;
+}
+.form-panel h3 { margin: 0 0 10px; font-size: 14px; }
+</style>
+</head>
+<body>
+  <h1>Azone Company Expenses</h1>
+  <p class="muted">Record company operating costs — papers, phone recharge, bags, packaging, and other incentives.</p>
+
+  <div class="form-panel">
+    <h3 id="formTitle">Add Expense</h3>
+    <div class="row">
+      <input type="date" id="inpDate" class="inp" />
+      <select id="selCategory" class="inp"></select>
+      <input type="text" id="inpDescription" class="inp" placeholder="Description (optional)" style="min-width: 180px;" />
+      <input type="number" id="inpAmount" class="inp" placeholder="Amount (LBP)" min="1" step="1" />
+      <input type="text" id="inpNotes" class="inp" placeholder="Notes (optional)" style="min-width: 140px;" />
+      <button class="primary" id="btnSave">Add</button>
+      <button class="secondary" id="btnCancelEdit" style="display:none;">Cancel</button>
+    </div>
+  </div>
+
+  <div class="row">
+    <label>From <input type="date" id="filterFrom" class="inp" /></label>
+    <label>To <input type="date" id="filterTo" class="inp" /></label>
+    <select id="filterCategory" class="inp"><option value="all">All categories</option></select>
+    <select id="selCurrency" class="inp">
+      <option value="USD">USD</option>
+      <option value="LBP">LBP</option>
+    </select>
+    <button class="secondary" id="btnRefresh">Refresh</button>
+  </div>
+
+  <div class="summary">
+    <div class="card">
+      <div class="label">Total Expenses</div>
+      <div class="value" id="totalAmount">—</div>
+    </div>
+    <div class="card">
+      <div class="label">Entries</div>
+      <div class="value" id="totalCount">—</div>
+    </div>
+  </div>
+
+  <div id="err" class="error"></div>
+  <div id="msg" class="msg"></div>
+
+  <div class="wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Category</th>
+          <th>Description</th>
+          <th class="num">Amount</th>
+          <th>Notes</th>
+          <th style="width: 140px;">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+      <tfoot id="tfoot"></tfoot>
+    </table>
+  </div>
+
+  <script>
+    const tbody = document.getElementById("tbody");
+    const tfoot = document.getElementById("tfoot");
+    const errEl = document.getElementById("err");
+    const msgEl = document.getElementById("msg");
+    const selCategory = document.getElementById("selCategory");
+    const filterCategory = document.getElementById("filterCategory");
+    const selCurrency = document.getElementById("selCurrency");
+    const formTitle = document.getElementById("formTitle");
+    const btnSave = document.getElementById("btnSave");
+    const btnCancelEdit = document.getElementById("btnCancelEdit");
+
+    let usdToLbpRate = 90000;
+    let displayCurrency = "USD";
+    let categories = [];
+    let editingId = null;
+
+    function setErr(e) { errEl.textContent = e ? String(e) : ""; }
+    function setMsg(m) { msgEl.textContent = m ? String(m) : ""; }
+
+    function escapeHtml(str) {
+      return String(str || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function fmtAmount(lbp) {
+      const x = Number(lbp) || 0;
+      if (displayCurrency === "LBP") return x.toLocaleString() + " L.L";
+      return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(x / usdToLbpRate);
+    }
+
+    function resetForm() {
+      editingId = null;
+      formTitle.textContent = "Add Expense";
+      btnSave.textContent = "Add";
+      btnCancelEdit.style.display = "none";
+      document.getElementById("inpDescription").value = "";
+      document.getElementById("inpAmount").value = "";
+      document.getElementById("inpNotes").value = "";
+      if (!document.getElementById("inpDate").value) {
+        document.getElementById("inpDate").value = new Date().toISOString().slice(0, 10);
+      }
+    }
+
+    function fillCategorySelects(cats) {
+      const opts = cats.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
+      selCategory.innerHTML = opts;
+      filterCategory.innerHTML = `<option value="all">All categories</option>${opts}`;
+    }
+
+    async function loadConfig() {
+      const cfg = await window.api.walletGetConfig();
+      usdToLbpRate = Number(cfg?.usdToLbpRate || 90000);
+      displayCurrency = cfg?.displayCurrency || "USD";
+      selCurrency.value = displayCurrency;
+      categories = await window.api.companyExpensesGetCategories();
+      fillCategorySelects(categories);
+    }
+
+    async function load() {
+      setErr("");
+      const from = document.getElementById("filterFrom").value || null;
+      const to = document.getElementById("filterTo").value || null;
+      const category = filterCategory.value || "all";
+      const data = await window.api.companyExpensesGetSummary({ from, to, category });
+
+      document.getElementById("totalAmount").textContent = fmtAmount(data.total_lbp);
+      document.getElementById("totalCount").textContent = String(data.count || 0);
+
+      const rows = data.rows || [];
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="6" class="muted">No expenses recorded.</td></tr>`;
+        tfoot.innerHTML = "";
+        return;
+      }
+
+      tbody.innerHTML = rows.map((r) => `
+        <tr data-id="${r.id}">
+          <td>${escapeHtml(r.expense_date)}</td>
+          <td>${escapeHtml(r.category)}</td>
+          <td>${escapeHtml(r.description || "")}</td>
+          <td class="num">${escapeHtml(fmtAmount(r.amount_lbp))}</td>
+          <td>${escapeHtml(r.notes || "")}</td>
+          <td>
+            <button class="secondary" data-edit>Edit</button>
+            <button class="danger" data-delete>Delete</button>
+          </td>
+        </tr>
+      `).join("");
+
+      tfoot.innerHTML = `
+        <tr>
+          <td colspan="3"><b>Total</b></td>
+          <td class="num"><b>${escapeHtml(fmtAmount(data.total_lbp))}</b></td>
+          <td colspan="2"></td>
+        </tr>
+      `;
+
+      tbody.querySelectorAll("[data-edit]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const tr = btn.closest("tr");
+          const id = Number(tr.getAttribute("data-id"));
+          const row = rows.find((x) => x.id === id);
+          if (!row) return;
+          editingId = id;
+          formTitle.textContent = "Edit Expense";
+          btnSave.textContent = "Save";
+          btnCancelEdit.style.display = "";
+          document.getElementById("inpDate").value = row.expense_date;
+          selCategory.value = row.category;
+          document.getElementById("inpDescription").value = row.description || "";
+          document.getElementById("inpAmount").value = String(row.amount_lbp);
+          document.getElementById("inpNotes").value = row.notes || "";
+        });
+      });
+
+      tbody.querySelectorAll("[data-delete]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const tr = btn.closest("tr");
+          const id = Number(tr.getAttribute("data-id"));
+          if (!confirm("Delete this expense?")) return;
+          const res = await window.api.companyExpensesDelete(id);
+          if (res?.ok === false) { setErr(res.error); return; }
+          setMsg("Expense deleted.");
+          if (editingId === id) resetForm();
+          await load();
+        });
+      });
+    }
+
+    btnSave.addEventListener("click", async () => {
+      setErr("");
+      setMsg("");
+      const payload = {
+        category: selCategory.value,
+        description: document.getElementById("inpDescription").value.trim(),
+        amount_lbp: document.getElementById("inpAmount").value,
+        expense_date: document.getElementById("inpDate").value,
+        notes: document.getElementById("inpNotes").value.trim(),
+      };
+
+      const res = editingId
+        ? await window.api.companyExpensesUpdate({ id: editingId, ...payload })
+        : await window.api.companyExpensesCreate(payload);
+
+      if (res?.ok === false) { setErr(res.error); return; }
+      setMsg(editingId ? "Expense updated." : "Expense added.");
+      resetForm();
+      await load();
+    });
+
+    btnCancelEdit.addEventListener("click", () => {
+      resetForm();
+      setErr("");
+    });
+
+    document.getElementById("btnRefresh").addEventListener("click", () => load().catch(setErr));
+    filterCategory.addEventListener("change", () => load().catch(setErr));
+    document.getElementById("filterFrom").addEventListener("change", () => load().catch(setErr));
+    document.getElementById("filterTo").addEventListener("change", () => load().catch(setErr));
+    selCurrency.addEventListener("change", () => {
+      displayCurrency = selCurrency.value;
+      load().catch(setErr);
+    });
+
+    const year = new Date().getFullYear();
+    document.getElementById("filterFrom").value = `${year}-01-01`;
+    document.getElementById("filterTo").value = new Date().toISOString().slice(0, 10);
+    document.getElementById("inpDate").value = new Date().toISOString().slice(0, 10);
+
+    loadConfig().then(load).catch(setErr);
+  </script>
+</body>
+</html>

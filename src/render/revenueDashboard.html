@@ -330,6 +330,7 @@ th {
             </tr>
           </thead>
           <tbody id="supplierSummaryBody"></tbody>
+          <tfoot id="supplierSummaryFoot"></tfoot>
         </table>
       </div>
 
@@ -444,6 +445,20 @@ th {
 
     function updateSupplierSummary(rows) {
       const tbody = document.getElementById('supplierSummaryBody');
+      const tfoot = document.getElementById('supplierSummaryFoot');
+
+      const totals = rows.reduce(
+        (acc, s) => {
+          acc.orders += Number(s.orders || 0);
+          acc.revenue += Number(s.revenue || 0);
+          acc.supplier_cost += Number(s.supplier_cost || 0);
+          acc.payable += Number(s.payable || 0);
+          acc.profit += Number(s.profit || 0);
+          return acc;
+        },
+        { orders: 0, revenue: 0, supplier_cost: 0, payable: 0, profit: 0 }
+      );
+
       tbody.innerHTML = rows.map(s => `
         <tr>
           <td>${s.supplier_name}</td>
@@ -454,6 +469,19 @@ th {
           <td class="num">${formatLbp(s.profit)}</td>
         </tr>
       `).join('');
+
+      if (tfoot) {
+        tfoot.innerHTML = rows.length ? `
+          <tr>
+            <td><b>Total</b></td>
+            <td class="num"><b>${formatNumber(totals.orders)}</b></td>
+            <td class="num"><b>${formatLbp(totals.revenue)}</b></td>
+            <td class="num"><b>${formatLbp(totals.supplier_cost)}</b></td>
+            <td class="num"><b>${formatLbp(totals.payable)}</b></td>
+            <td class="num"><b>${formatLbp(totals.profit)}</b></td>
+          </tr>
+        ` : '';
+      }
     }
 
     async function loadDashboardData() {

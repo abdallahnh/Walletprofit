@@ -10,6 +10,7 @@ const selCurrencyDisplay = $("selCurrencyDisplay");
 const selPaidFilter = $("selPaidFilter");
 const selTypeFilter = $("selTypeFilter");
 const selZeroFeesFilter = $("selZeroFeesFilter");
+const inpOrderSearch = $("inpOrderSearch");
 const btnColumns = $("btnColumns");
 const columnsPanel = $("columnsPanel");
 
@@ -252,9 +253,15 @@ function getFilteredRows(rows) {
   const paidFilter = selPaidFilter.value || "all";
   const typeFilter = selTypeFilter?.value || "all";
   const zeroFeesFilter = selZeroFeesFilter?.value || "hide_zero";
+  const orderSearch = String(inpOrderSearch?.value || "").trim().toLowerCase();
   const supplierIds = getSelectedSupplierIds();
 
   return rows.filter((r) => {
+    if (orderSearch) {
+      const code = String(r.order_code || "").toLowerCase();
+      if (!code.includes(orderSearch)) return false;
+    }
+
     if (supplierIds && supplierIds.length > 0) {
       if (!r.supplier_id || !supplierIds.includes(r.supplier_id)) return false;
     }
@@ -350,7 +357,19 @@ function renderSupplierSummary(rows) {
   let summaryRows = Array.from(bySupplier.values());
   summaryRows = sortRows(summaryRows, summarySortKey, summarySortDir);
 
-  tbody.innerHTML = summaryRows
+  const totals = summaryRows.reduce(
+    (acc, s) => {
+      acc.orders += s.orders;
+      acc.revenue += s.revenue;
+      acc.supplier_cost += s.supplier_cost;
+      acc.payable += s.payable;
+      acc.profit += s.profit;
+      return acc;
+    },
+    { orders: 0, revenue: 0, supplier_cost: 0, payable: 0, profit: 0 }
+  );
+
+  const bodyHtml = summaryRows
     .map(
       (s) => `
     <tr>
@@ -364,6 +383,23 @@ function renderSupplierSummary(rows) {
   `
     )
     .join("");
+
+  const totalHtml = summaryRows.length
+    ? `
+    <tr class="summary-total-row">
+      <td><b>Total</b></td>
+      <td class="num"><b>${totals.orders}</b></td>
+      <td class="num"><b>${fmt(totals.revenue)}</b></td>
+      <td class="num"><b>${fmt(totals.supplier_cost)}</b></td>
+      <td class="num"><b>${fmt(totals.payable)}</b></td>
+      <td class="num"><b>${fmt(totals.profit)}</b></td>
+    </tr>`
+    : "";
+
+  tbody.innerHTML = bodyHtml;
+
+  const tfoot = $("supplierSummaryFoot");
+  if (tfoot) tfoot.innerHTML = totalHtml;
 }
 
 function escapeHtml(str) {
@@ -746,6 +782,9 @@ $("btnSettlements").addEventListener("click", () => {
 $("btnTransactions").addEventListener("click", () => {
   window.api.openTransactions();
 });
+$("btnCompanyExpenses").addEventListener("click", () => {
+  window.api.openCompanyExpenses();
+});
 
 // Modal buttons
 $("btnWalletClose").addEventListener("click", closeWalletModal);
@@ -783,6 +822,7 @@ selCurrencyDisplay.addEventListener("change", () => {
 selPaidFilter.addEventListener("change", () => refreshViewFromCache().catch(setError));
 selTypeFilter?.addEventListener("change", () => refreshViewFromCache().catch(setError));
 selZeroFeesFilter?.addEventListener("change", () => refreshViewFromCache().catch(setError));
+inpOrderSearch?.addEventListener("input", () => refreshViewFromCache().catch(setError));
 
 document.querySelectorAll("th[data-sort]").forEach((th) => {
   th.addEventListener("click", () => {

@@ -255,6 +255,12 @@ td.num, th.num {
   border-bottom: 1px solid #eee;
 }
 .supplier-summary table { width: 100%; }
+.supplier-summary tfoot td,
+.supplier-summary tr.summary-total-row td {
+  font-weight: 700;
+  background: #f5f5f5;
+  border-top: 2px solid #ddd;
+}
 .supplier-summary th.sortable {
   cursor: pointer;
   user-select: none;
@@ -363,6 +369,7 @@ th.sortable:hover { background: #f0f0f0; }
       <button class="menu-btn" id="btnRevenueDashboard">Dashboard</button>
       <button class="menu-btn" id="btnSettlements">Settlements</button>
       <button class="menu-btn" id="btnTransactions">Transactions</button>
+      <button class="menu-btn" id="btnCompanyExpenses">Azone Expenses</button>
       <button class="menu-btn" id="btnDbAdmin">DB Admin</button>
     </div>
 
@@ -371,6 +378,7 @@ th.sortable:hover { background: #f0f0f0; }
     <div class="menu-group">
       <label>Options:</label>
       <div id="supplierFilterContainer"></div>
+      <input type="search" id="inpOrderSearch" class="inp" placeholder="Search order code" style="min-width: 140px;" />
       <label class="pill">
         <input type="checkbox" id="chkSettlements" />
         Include Settlements
@@ -423,6 +431,7 @@ th.sortable:hover { background: #f0f0f0; }
           </tr>
         </thead>
         <tbody id="supplierSummaryBody"></tbody>
+        <tfoot id="supplierSummaryFoot"></tfoot>
       </table>
     </div>
   </div>

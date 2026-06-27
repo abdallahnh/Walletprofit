@@ -1,5 +1,5 @@
 const { getDb } = require("./database");
-const { normalizeType, extractOrderCode } = require("./wallet");
+const { normalizeType, extractOrderCode, classifyTransaction } = require("./wallet");
 
 function mapTransactionRow(r) {
   return {
@@ -9,7 +9,7 @@ function mapTransactionRow(r) {
     wallet: r.wallet || "",
     reason: r.reason || "",
     type: r.type || "",
-    normalized_type: normalizeType(r.type),
+    normalized_type: classifyTransaction(r.type, r.reason),
     created_at: r.created_at || "",
     order_code: r.order_code || extractOrderCode(r.reason),
   };
@@ -69,11 +69,11 @@ function getAllTransactions(opts = {}) {
 
 function getTransactionTypeCounts() {
   const db = getDb();
-  const rows = db.prepare("SELECT type FROM transactions").all();
+  const rows = db.prepare("SELECT type, reason FROM transactions").all();
   const counts = {};
 
   for (const r of rows) {
-    const key = normalizeType(r.type);
+    const key = classifyTransaction(r.type, r.reason);
     counts[key] = (counts[key] || 0) + 1;
   }
 

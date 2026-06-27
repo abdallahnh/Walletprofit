@@ -116,6 +116,7 @@ function initDatabase(userDataPath) {
   ensureSuppliersColumns(db);
   ensureSalesUniqueness(db);
   ensurePriceHistory(db);
+  ensureCompanyExpensesTable(db);
 
   // Ensure a default wallet config row exists
   const existing = db.prepare("SELECT value FROM config WHERE key=?").get("walletConfig");
@@ -244,6 +245,26 @@ function ensureSalesUniqueness(dbConn) {
     CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_order_barcode
     ON sales(order_code, barcode)
     WHERE order_code IS NOT NULL AND barcode IS NOT NULL
+  `);
+}
+
+function ensureCompanyExpensesTable(dbConn) {
+  dbConn.exec(`
+    CREATE TABLE IF NOT EXISTS company_expenses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      category TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      amount_lbp INTEGER NOT NULL DEFAULT 0,
+      expense_date TEXT NOT NULL,
+      notes TEXT DEFAULT '',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  dbConn.exec(`
+    CREATE INDEX IF NOT EXISTS idx_company_expenses_date
+    ON company_expenses(expense_date DESC)
   `);
 }
 
