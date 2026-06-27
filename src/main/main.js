@@ -1,5 +1,5 @@
 // src/main/main.js
-const { app, BrowserWindow, ipcMain, dialog, Menu } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require("electron");
 const path = require("path");
 const XLSX = require("xlsx");
 
@@ -11,6 +11,7 @@ const salesDb = require("../db/sales");
 const adminDb = require("../db/admin");
 const suppliersDb = require("../db/suppliers");
 const billExport = require("../db/billExport");
+const transactionsDb = require("../db/transactions");
 
 const logger = require("../utils/logger");
 
@@ -232,8 +233,12 @@ ipcMain.handle("suppliers:getAll", async () => {
   return suppliersDb.getAllSuppliers();
 });
 
-ipcMain.handle("suppliers:create", async (_evt, name) => {
-  return suppliersDb.createSupplier(name);
+ipcMain.handle("suppliers:create", async (_evt, payload) => {
+  return suppliersDb.createSupplier(payload);
+});
+
+ipcMain.handle("suppliers:update", async (_evt, payload) => {
+  return suppliersDb.updateSupplier(payload || {});
 });
 
 ipcMain.handle("suppliers:rename", async (_evt, { id, name }) => {
@@ -264,6 +269,52 @@ ipcMain.handle("open-suppliers", () => {
   });
 
   win.loadFile(suppliersPath);
+});
+
+ipcMain.handle("transactions:getSettlements", async () => {
+  return transactionsDb.getSettlements();
+});
+
+ipcMain.handle("transactions:getAll", async (_evt, opts) => {
+  return transactionsDb.getAllTransactions(opts || {});
+});
+
+ipcMain.handle("transactions:getTypeCounts", async () => {
+  return transactionsDb.getTransactionTypeCounts();
+});
+
+ipcMain.handle("open-settlements", () => {
+  const { preloadJs } = resolveRendererPaths();
+  const settlementsPath = path.join(app.getAppPath(), "src", "render", "settlements.html");
+
+  const win = new BrowserWindow({
+    width: 1000,
+    height: 700,
+    webPreferences: {
+      preload: preloadJs,
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  win.loadFile(settlementsPath);
+});
+
+ipcMain.handle("open-transactions", () => {
+  const { preloadJs } = resolveRendererPaths();
+  const transactionsPath = path.join(app.getAppPath(), "src", "render", "transactions.html");
+
+  const win = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    webPreferences: {
+      preload: preloadJs,
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  win.loadFile(transactionsPath);
 });
 
 ipcMain.handle("backup:export", async () => {
@@ -385,6 +436,28 @@ ipcMain.handle("bill:exportWord", async (_evt, billData) => {
   try {
     billExport.exportBillWord(billData, filePath);
     return { ok: true, path: filePath };
+  } catch (e) {
+    return { ok: false, error: String(e.message || e) };
+  }
+});
+
+ipcMain.handle("bill:openWhatsApp", async (_evt, billData) => {
+  if (!billData?.order_code) return { ok: false, error: "Missing bill data" };
+
+  const phone = billExport.normalizeWhatsAppPhone(billData.supplier_phone);
+  if (!phone) {
+    return {
+      ok: false,
+      error: "Supplier has no phone number. Add it in Suppliers or DB Admin.",
+    };
+  }
+
+  const text = billExport.buildBillPlainText(billData);
+  const url = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
+
+  try {
+    await shell.openExternal(url);
+    return { ok: true };
   } catch (e) {
     return { ok: false, error: String(e.message || e) };
   }

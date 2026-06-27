@@ -37,6 +37,8 @@ function initDatabase(userDataPath) {
     CREATE TABLE IF NOT EXISTS suppliers (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      color TEXT DEFAULT '#e8f4fc',
+      phone TEXT DEFAULT '',
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -111,6 +113,7 @@ function initDatabase(userDataPath) {
   // Lightweight schema migrations for existing databases.
   ensureProductsColumns(db);
   ensureOrderMetaColumns(db);
+  ensureSuppliersColumns(db);
   ensureSalesUniqueness(db);
   ensurePriceHistory(db);
 
@@ -176,6 +179,18 @@ function migrateLegacyDatabase(userDataPath, targetDbPath) {
   }
 
   return { migrated: false };
+}
+
+function ensureSuppliersColumns(dbConn) {
+  const cols = dbConn.prepare("PRAGMA table_info(suppliers)").all();
+  const existing = new Set(cols.map((c) => c.name));
+
+  if (!existing.has("color")) {
+    dbConn.exec("ALTER TABLE suppliers ADD COLUMN color TEXT DEFAULT '#e8f4fc'");
+  }
+  if (!existing.has("phone")) {
+    dbConn.exec("ALTER TABLE suppliers ADD COLUMN phone TEXT DEFAULT ''");
+  }
 }
 
 function ensureOrderMetaColumns(dbConn) {

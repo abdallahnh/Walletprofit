@@ -88,6 +88,14 @@
       Name
       <input id="inpSupplierName" type="text" placeholder="Supplier name" />
     </label>
+    <label>
+      Color
+      <input id="inpSupplierColor" type="color" value="#dbeafe" />
+    </label>
+    <label>
+      Phone
+      <input id="inpSupplierPhone" type="text" placeholder="WhatsApp phone" />
+    </label>
     <button id="btnAddSupplier">Add Supplier</button>
     <span id="supplierMsg"></span>
   </div>
@@ -113,6 +121,8 @@
     const columnsPanel = $("columnsPanel");
     const supplierPanel = $("supplierPanel");
     const inpSupplierName = $("inpSupplierName");
+    const inpSupplierColor = $("inpSupplierColor");
+    const inpSupplierPhone = $("inpSupplierPhone");
     const btnAddSupplier = $("btnAddSupplier");
     const supplierMsg = $("supplierMsg");
     let allRows = [];
@@ -173,11 +183,13 @@
           const tr = btn.closest("tr");
           const id = Number(tr.getAttribute("data-id"));
           const name = tr.querySelector(".supplier-name").value.trim();
+          const color = tr.querySelector("[data-edit-color]")?.value || "#e8f4fc";
+          const phone = tr.querySelector(".supplier-phone")?.value?.trim() || "";
           if (!name) {
             setSupplierMsg("Supplier name cannot be empty", true);
             return;
           }
-          const res = await window.api.suppliersRename(id, name);
+          const res = await window.api.suppliersUpdate({ id, name, color, phone });
           if (res?.ok === false) {
             setSupplierMsg(res.error || "Failed to update supplier", true);
             return;
@@ -208,11 +220,13 @@
           || String(r.id ?? "").includes(query);
       });
 
-      thead.innerHTML = "<tr><th>id</th><th>name</th><th>created_at</th><th>Actions</th></tr>";
+      thead.innerHTML = "<tr><th>id</th><th>color</th><th>name</th><th>phone</th><th>created_at</th><th>Actions</th></tr>";
       tbody.innerHTML = visibleRows.map((r) => `
         <tr data-id="${r.id}">
           <td>${r.id}</td>
+          <td><input type="color" data-edit-color value="${escapeHtml(r.color || "#e8f4fc")}" /></td>
           <td><input class="supplier-name" type="text" value="${escapeHtml(r.name)}" /></td>
+          <td><input class="supplier-phone" type="text" value="${escapeHtml(r.phone || "")}" placeholder="Phone" /></td>
           <td>${escapeHtml(r.created_at)}</td>
           <td class="actions">
             <button data-save-supplier>Save</button>
@@ -316,7 +330,11 @@
         setSupplierMsg("Enter a supplier name", true);
         return;
       }
-      const res = await window.api.suppliersCreate(name);
+      const res = await window.api.suppliersCreate({
+        name,
+        color: inpSupplierColor.value,
+        phone: inpSupplierPhone.value.trim(),
+      });
       if (res?.ok === false) {
         setSupplierMsg(res.error || "Failed to add supplier", true);
         return;

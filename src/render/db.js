@@ -213,6 +213,7 @@ function normalizeType(type) {
   if (t === "value_added_tax") return "vat";
   if (t === "merchant_incentive") return "incentive";
   if (t === "balance_settlement") return "settlement";
+  if (t === "marketing_immediate_discount") return "marketing";
 
   // Text exports
   if (t.includes("gross")) return "gross";
@@ -220,6 +221,7 @@ function normalizeType(type) {
   if (t.includes("value added") || t.includes("vat")) return "vat";
   if (t.includes("merchant incentive") || t.includes("cashback")) return "incentive";
   if (t.includes("balance settlement") || t.includes("settlement")) return "settlement";
+  if (t.includes("marketing")) return "marketing";
 
   return "other";
 }
@@ -331,6 +333,7 @@ function computeOrders() {
         service_fee: 0,
         vat: 0,
         incentive: 0,
+        marketing: 0,
         row_count: 0,
         dates: new Set()
       });
@@ -345,6 +348,7 @@ function computeOrders() {
     else if (ntype === "service_fee") agg.service_fee += amt;
     else if (ntype === "vat") agg.vat += amt;
     else if (ntype === "incentive") agg.incentive += Math.abs(amt);
+    else if (ntype === "marketing") agg.marketing += Math.abs(amt);
   }
 
   const metas = db.prepare("SELECT order_code, supplier_cost, supplier_paid FROM order_meta").all();
@@ -355,9 +359,10 @@ function computeOrders() {
     const meta = metaMap.get(agg.order_code) || { supplier_cost: 0, supplier_paid: 0 };
 
 const incentive = agg.incentive || 0;
+const marketing = agg.marketing || 0;
 
 const merchant_payout =
-  agg.gross - agg.service_fee - agg.vat + incentive;
+  agg.gross - agg.service_fee - agg.vat + incentive - marketing;
 
 const toters_margin =
   agg.service_fee + agg.vat - incentive;
@@ -372,6 +377,7 @@ const net_profit =
       service_fee: agg.service_fee,
       vat: agg.vat,
       incentive: agg.incentive,
+      marketing,
       merchant_payout,
       toters_margin,
       supplier_cost: meta.supplier_cost || 0,
@@ -403,6 +409,7 @@ function getTotals(opts = {}) {
     service_fee: 0,
     vat: 0,
     incentive: 0,
+    marketing: 0,
     merchantPayout: 0,
     totersMargin: 0,
     supplierCost: 0,
@@ -416,6 +423,7 @@ function getTotals(opts = {}) {
     totals.service_fee += o.service_fee || 0;
     totals.vat += o.vat || 0;
     totals.incentive += o.incentive || 0;
+    totals.marketing += o.marketing || 0;
     totals.merchantPayout += o.merchant_payout || 0;
     totals.totersMargin += o.toters_margin || 0;
     totals.supplierCost += o.supplier_cost || 0;
@@ -469,7 +477,7 @@ function processOrderItems(order) {
 function exportOrdersCsv() {
   const { orders } = computeOrders();
   const header = [
-    "order_code","gross","service_fee","vat","incentive","merchant_payout","toters_margin",
+    "order_code","gross","service_fee","vat","incentive","marketing","merchant_payout","toters_margin",
     "supplier_cost","supplier_paid","net_profit","row_count","dates"
   ];
 
@@ -481,6 +489,7 @@ function exportOrdersCsv() {
       o.service_fee,
       o.vat,
       o.incentive,
+      o.marketing,
       o.merchant_payout,
       o.toters_margin,
       o.supplier_cost,

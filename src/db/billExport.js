@@ -11,12 +11,52 @@ function formatDisplayAmount(amount, currency) {
   return "$" + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function escapeHtml(str) {
+  return String(str ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function buildBillPlainText(billData) {
+  const currency = billData.display_currency || "USD";
+  const lines = [
+    "SUPPLIER PAYMENT BILL",
+    "",
+    `Supplier: ${billData.supplier_name || ""}`,
+    `Phone: ${billData.supplier_phone || "-"}`,
+    `Order: ${billData.order_code || ""}`,
+    `Date: ${billData.order_date || "-"}`,
+    `Status: ${billData.supplier_paid ? "PAID" : "UNPAID"}`,
+    "",
+    "Items:",
+  ];
+
+  for (const line of billData.lines || []) {
+    lines.push(
+      `- ${line.item_name} | Qty: ${line.quantity} | ${formatDisplayAmount(line.line_cost_display, currency)}`
+    );
+  }
+
+  lines.push("");
+  lines.push(`TOTAL DUE: ${formatDisplayAmount(billData.total_cost_display, currency)}`);
+  lines.push("");
+  lines.push("Please verify quantities and amounts before payment.");
+  return lines.join("\n");
+}
+
+function normalizeWhatsAppPhone(phone) {
+  return String(phone || "").replace(/\D/g, "");
+}
+
 function exportBillExcel(billData, filePath) {
   const currency = billData.display_currency || "USD";
   const rows = [
     ["SUPPLIER PAYMENT BILL"],
     [],
     ["Supplier", billData.supplier_name || ""],
+    ["Phone", billData.supplier_phone || ""],
     ["Order Code", billData.order_code || ""],
     ["Order Date", billData.order_date || ""],
     ["Status", billData.supplier_paid ? "PAID" : "UNPAID"],
@@ -48,7 +88,6 @@ function exportBillExcel(billData, filePath) {
 
 function buildBillHtml(billData) {
   const currency = billData.display_currency || "USD";
-  const suffix = currencySuffix(currency);
   const lineRows = (billData.lines || [])
     .map(
       (l) => `
@@ -69,6 +108,7 @@ function buildBillHtml(billData) {
       <p style="text-align:center; color:#666; margin-top: 0;">Amount payable to supplier for order fulfillment</p>
       <table style="width:100%; margin: 20px 0; border-collapse: collapse;">
         <tr><td style="padding:6px 0;"><b>Supplier:</b></td><td>${escapeHtml(billData.supplier_name)}</td></tr>
+        <tr><td style="padding:6px 0;"><b>Phone:</b></td><td>${escapeHtml(billData.supplier_phone || "-")}</td></tr>
         <tr><td style="padding:6px 0;"><b>Order Code:</b></td><td>${escapeHtml(billData.order_code)}</td></tr>
         <tr><td style="padding:6px 0;"><b>Order Date:</b></td><td>${escapeHtml(billData.order_date || "-")}</td></tr>
         <tr><td style="padding:6px 0;"><b>Status:</b></td><td>${billData.supplier_paid ? "PAID" : "UNPAID"}</td></tr>
@@ -100,14 +140,6 @@ function buildBillHtml(billData) {
     </div>`;
 }
 
-function escapeHtml(str) {
-  return String(str ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 function exportBillWord(billData, filePath) {
   const body = buildBillHtml(billData);
   const html = `<!DOCTYPE html>
@@ -135,5 +167,7 @@ module.exports = {
   exportBillExcel,
   exportBillWord,
   buildBillHtml,
+  buildBillPlainText,
   formatDisplayAmount,
+  normalizeWhatsAppPhone,
 };

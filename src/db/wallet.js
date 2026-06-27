@@ -19,12 +19,14 @@ function normalizeType(type) {
   if (t === "value_added_tax") return "vat";
   if (t === "merchant_incentive") return "incentive";
   if (t === "balance_settlement") return "settlement";
+  if (t === "marketing_immediate_discount") return "marketing";
 
   if (t.includes("gross")) return "gross";
   if (t.includes("store listing") || t.includes("service fee")) return "service_fee";
   if (t.includes("value added") || t.includes("vat")) return "vat";
   if (t.includes("merchant incentive") || t.includes("cashback")) return "incentive";
   if (t.includes("balance settlement") || t.includes("settlement")) return "settlement";
+  if (t.includes("marketing")) return "marketing";
 
   return "other";
 }
@@ -337,9 +339,12 @@ function importBackupData(data, { replace = false } = {}) {
   const configRows = Array.isArray(data.config) ? data.config : [];
 
   const insertSupplier = db.prepare(`
-    INSERT INTO suppliers (id, name, created_at)
-    VALUES (@id, @name, @created_at)
-    ON CONFLICT(id) DO UPDATE SET name = excluded.name
+    INSERT INTO suppliers (id, name, color, phone, created_at)
+    VALUES (@id, @name, @color, @phone, @created_at)
+    ON CONFLICT(id) DO UPDATE SET
+      name = excluded.name,
+      color = excluded.color,
+      phone = excluded.phone
   `);
 
   const insertTx = db.prepare(`
@@ -435,6 +440,8 @@ function importBackupData(data, { replace = false } = {}) {
       insertSupplier.run({
         id: s.id,
         name: s.name,
+        color: s.color || "#e8f4fc",
+        phone: s.phone || "",
         created_at: s.created_at || new Date().toISOString(),
       });
     }

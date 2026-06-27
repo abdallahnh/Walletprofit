@@ -9,6 +9,7 @@ const chkSettlements = $("chkSettlements");
 const selCurrencyDisplay = $("selCurrencyDisplay");
 const selPaidFilter = $("selPaidFilter");
 const selTypeFilter = $("selTypeFilter");
+const selZeroFeesFilter = $("selZeroFeesFilter");
 const btnColumns = $("btnColumns");
 const columnsPanel = $("columnsPanel");
 
@@ -36,6 +37,7 @@ let tableSortDir = "asc";
 let summarySortKey = "supplier_name";
 let summarySortDir = "asc";
 let supplierFilter = null;
+let supplierColorById = new Map();
 
 const COLUMN_DEFS = [
   { key: "view", label: "View" },
@@ -45,6 +47,7 @@ const COLUMN_DEFS = [
   { key: "service", label: "Service" },
   { key: "vat", label: "VAT" },
   { key: "incentive", label: "Incentive" },
+  { key: "marketing", label: "Marketing" },
   { key: "merchant_payout", label: "Merchant Payout" },
   { key: "toters_margin", label: "Toters Margin" },
   { key: "supplier_cost", label: "Supplier Cost" },
@@ -102,6 +105,50 @@ function renderColumnsPanel() {
   });
 }
 
+function fmtNumHideZero(n, currency = currentCurrency) {
+  if (!Number(n)) return "";
+  return fmt(n, currency);
+}
+
+function textColorForBg(hex) {
+  const c = String(hex || "").replace("#", "");
+  if (c.length !== 6) return "#111";
+  const r = parseInt(c.slice(0, 2), 16);
+  const g = parseInt(c.slice(2, 4), 16);
+  const b = parseInt(c.slice(4, 6), 16);
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.6 ? "#111111" : "#ffffff";
+}
+
+function getSupplierColor(supplierId, fallback) {
+  if (!supplierId) return "";
+  return supplierColorById.get(Number(supplierId)) || fallback || "";
+}
+
+function applySupplierSelectStyle(sel, colorHint) {
+  const color = colorHint || getSupplierColor(sel.value ? Number(sel.value) : null);
+  if (color) {
+    sel.style.backgroundColor = color;
+    sel.style.color = textColorForBg(color);
+  } else {
+    sel.style.backgroundColor = "";
+    sel.style.color = "";
+  }
+}
+
+function applyZeroFeeColumnVisibility(rows) {
+  const visible = new Set(getVisibleColumns());
+  const hideGross = rows.length > 0 && rows.every((r) => !Number(r.gross || 0));
+  const hideService = rows.length > 0 && rows.every((r) => !Number(r.service_fee || 0));
+
+  document.querySelectorAll('[data-col="gross"]').forEach((el) => {
+    el.style.display = !visible.has("gross") || hideGross ? "none" : "";
+  });
+  document.querySelectorAll('[data-col="service"]').forEach((el) => {
+    el.style.display = !visible.has("service") || hideService ? "none" : "";
+  });
+}
+
 function fmt(n, currency = currentCurrency) {
   const x = Number(n) || 0;
 
@@ -145,6 +192,7 @@ function setStats(t) {
     [`Service`, fmt(t.service_fee)],
     [`VAT`, fmt(t.vat)],
     [`Incentive`, fmt(t.incentive)],
+    [`Marketing`, fmt(t.marketing)],
     [`Merchant Payout`, fmt(t.merchantPayout)],
     [`Toters Margin`, fmt(t.totersMargin)],
     [`Supplier Cost`, fmt(t.supplierCost)],
@@ -168,6 +216,7 @@ function calculateTotalsFromRows(rows, includeSettlements) {
     service_fee: 0,
     vat: 0,
     incentive: 0,
+    marketing: 0,
     merchantPayout: 0,
     totersMargin: 0,
     supplierCost: 0,
@@ -181,6 +230,7 @@ function calculateTotalsFromRows(rows, includeSettlements) {
     totals.service_fee += Number(r.service_fee || 0);
     totals.vat += Number(r.vat || 0);
     totals.incentive += Number(r.incentive || 0);
+    totals.marketing += Number(r.marketing || 0);
     totals.merchantPayout += Number(r.merchant_payout || 0);
     totals.totersMargin += Number(r.toters_margin || 0);
     totals.supplierCost += Number(r.supplier_cost || 0);
@@ -200,6 +250,7 @@ function getSelectedSupplierIds() {
 function getFilteredRows(rows) {
   const paidFilter = selPaidFilter.value || "all";
   const typeFilter = selTypeFilter?.value || "all";
+  const zeroFeesFilter = selZeroFeesFilter?.value || "hide_zero";
   const supplierIds = getSelectedSupplierIds();
 
   return rows.filter((r) => {
@@ -209,6 +260,12 @@ function getFilteredRows(rows) {
 
     if (paidFilter === "paid" && !r.supplier_paid) return false;
     if (paidFilter === "unpaid" && r.supplier_paid) return false;
+
+    if (zeroFeesFilter === "zero_only") {
+      if (Number(r.gross || 0) !== 0 || Number(r.service_fee || 0) !== 0) return false;
+    } else {
+      if (Number(r.gross || 0) === 0 && Number(r.service_fee || 0) === 0) return false;
+    }
 
     if (typeFilter === "all") return true;
     if (typeFilter === "missing") return !!r.has_missing_types;
@@ -251,6 +308,9 @@ function applyTableSort(rows) {
 async function loadSupplierList() {
   try {
     supplierListCache = await window.api.suppliersGetAll();
+    supplierColorById = new Map(
+      supplierListCache.map((s) => [Number(s.id), s.color || "#e8f4fc"])
+    );
     if (supplierFilter) supplierFilter.reload();
   } catch (e) {
     console.error("Failed to load suppliers:", e);
@@ -347,10 +407,11 @@ function renderRows(rows) {
           data-kind="supplier"
         >${buildSupplierSelectHtml(r.supplier_id)}</select>
       </td>
-      <td class="num" data-col="gross">${fmt(r.gross)}</td>
-      <td class="num" data-col="service">${fmt(r.service_fee)}</td>
+      <td class="num" data-col="gross">${fmtNumHideZero(r.gross)}</td>
+      <td class="num" data-col="service">${fmtNumHideZero(r.service_fee)}</td>
       <td class="num" data-col="vat">${fmt(r.vat)}</td>
       <td class="num" data-col="incentive">${fmt(r.incentive)}</td>
+      <td class="num" data-col="marketing">${fmtNumHideZero(r.marketing)}</td>
       <td class="num" data-col="merchant_payout">${fmt(r.merchant_payout)}</td>
       <td class="num" data-col="toters_margin">${fmt(r.toters_margin)}</td>
       <td class="num" data-col="supplier_cost">
@@ -384,9 +445,14 @@ function renderRows(rows) {
 
   // wire inputs
   tbody.querySelectorAll("select[data-kind='supplier']").forEach((sel) => {
+    const orderCode = sel.getAttribute("data-order");
+    const row = rows.find((r) => r.order_code === orderCode);
+    applySupplierSelectStyle(sel, row?.supplier_color);
+
     sel.addEventListener("change", async (e) => {
       const order_code = e.target.getAttribute("data-order");
       const supplier_id = e.target.value ? Number(e.target.value) : null;
+      applySupplierSelectStyle(e.target, getSupplierColor(supplier_id));
       const costEl = tbody.querySelector(`input[data-kind='cost'][data-order='${order_code}']`);
       const paidEl = tbody.querySelector(`input[data-kind='paid'][data-order='${order_code}']`);
       const supplier_cost = costEl ? supplierCostDisplayToLbp(costEl.value) : 0;
@@ -451,6 +517,7 @@ function renderRows(rows) {
   });
 
   applyColumnVisibility();
+  applyZeroFeeColumnVisibility(rows);
 }
 
 async function refresh() {
@@ -657,6 +724,12 @@ $("btnSuppliers").addEventListener("click", () => {
 $("btnRevenueDashboard").addEventListener("click", () => {
   window.api.openRevenueDashboard();
 });
+$("btnSettlements").addEventListener("click", () => {
+  window.api.openSettlements();
+});
+$("btnTransactions").addEventListener("click", () => {
+  window.api.openTransactions();
+});
 
 // Modal buttons
 $("btnWalletClose").addEventListener("click", closeWalletModal);
@@ -693,6 +766,7 @@ selCurrencyDisplay.addEventListener("change", () => {
 
 selPaidFilter.addEventListener("change", () => refreshViewFromCache().catch(setError));
 selTypeFilter?.addEventListener("change", () => refreshViewFromCache().catch(setError));
+selZeroFeesFilter?.addEventListener("change", () => refreshViewFromCache().catch(setError));
 
 document.querySelectorAll("th[data-sort]").forEach((th) => {
   th.addEventListener("click", () => {

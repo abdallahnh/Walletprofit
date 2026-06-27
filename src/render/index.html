@@ -219,6 +219,7 @@ th.sortable:hover { background: #f0f0f0; }
   border-radius: 8px;
   font-size: 12px;
   max-width: 100%;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
   </style>
 </head>
@@ -310,6 +311,8 @@ th.sortable:hover { background: #f0f0f0; }
       <button class="menu-btn" id="btnProducts">Products</button>
       <button class="menu-btn" id="btnSuppliers">Suppliers</button>
       <button class="menu-btn" id="btnRevenueDashboard">Dashboard</button>
+      <button class="menu-btn" id="btnSettlements">Settlements</button>
+      <button class="menu-btn" id="btnTransactions">Transactions</button>
       <button class="menu-btn" id="btnDbAdmin">DB Admin</button>
     </div>
 
@@ -333,7 +336,12 @@ th.sortable:hover { background: #f0f0f0; }
         <option value="service_fee">Service Fee</option>
         <option value="vat">VAT</option>
         <option value="incentive">Incentive</option>
+        <option value="marketing">Marketing</option>
         <option value="missing">Missing items</option>
+      </select>
+      <select id="selZeroFeesFilter" class="inp" style="margin-left: 8px;">
+        <option value="hide_zero" selected>Hide zero gross &amp; service</option>
+        <option value="zero_only">Zero gross &amp; service only</option>
       </select>
       <select id="selCurrencyDisplay" class="inp" style="margin-left: 8px;">
         <option value="USD">USD</option>
@@ -380,6 +388,7 @@ th.sortable:hover { background: #f0f0f0; }
           <th class="num" data-col="service">Service</th>
           <th class="num" data-col="vat">VAT</th>
           <th class="num" data-col="incentive">Incentive</th>
+          <th class="num" data-col="marketing">Marketing</th>
           <th class="num" data-col="merchant_payout">Merchant Payout</th>
           <th class="num" data-col="toters_margin">Toters Margin</th>
           <th class="num" data-col="supplier_cost">Supplier Cost</th>

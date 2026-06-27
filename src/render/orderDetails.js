@@ -1,4 +1,5 @@
 const { ipcRenderer } = require("electron");
+const billExport = require("../db/billExport");
 
 let currentBillData = null;
 
@@ -11,9 +12,33 @@ function escapeHtml(str) {
 }
 
 function formatAmount(amount, currency) {
-  const n = Number(amount) || 0;
-  if (currency === "LBP") return n.toLocaleString() + " L.L";
-  return "$" + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return billExport.formatDisplayAmount(amount, currency);
+}
+
+function getCustomerPhones(order) {
+  const client = order.client || order.customer || {};
+  const address = order.address || {};
+
+  const accountPhone = String(
+    client.phone_number || client.phone || client.mobile || order.phone_number || ""
+  ).trim();
+
+  const deliveryPhone = String(
+    address.phone_number || address.phone || address.mobile || ""
+  ).trim();
+
+  const countryCode = String(
+    address.country_code || client.country_code || order.country_code || ""
+  ).trim();
+
+  return { accountPhone, deliveryPhone, countryCode };
+}
+
+function formatPhoneLine(label, phone, countryCode) {
+  if (!phone) return `<div><b>${label}:</b> -</div>`;
+  const cc = countryCode ? `+${countryCode.replace(/\D/g, "")} ` : "";
+  const display = `${cc}${phone}`;
+  return `<div><b>${label}:</b> <a href="tel:${display.replace(/\s/g, "")}">${escapeHtml(display)}</a></div>`;
 }
 
 function renderBill(billData) {
@@ -46,6 +71,8 @@ function renderBill(billData) {
     <div class="bill-meta">
       <div><b>Supplier</b></div>
       <div>${escapeHtml(billData.supplier_name)}</div>
+      <div><b>Supplier Phone</b></div>
+      <div>${escapeHtml(billData.supplier_phone || "-")}</div>
       <div><b>Order Code</b></div>
       <div>${escapeHtml(billData.order_code)}</div>
       <div><b>Order Date</b></div>
@@ -105,6 +132,25 @@ document.getElementById("btnPrintBill").addEventListener("click", () => {
   window.print();
 });
 
+document.getElementById("btnCopyBill").addEventListener("click", async () => {
+  if (!currentBillData) return;
+  const text = billExport.buildBillPlainText(currentBillData);
+  try {
+    await navigator.clipboard.writeText(text);
+    alert("Bill copied to clipboard. Paste it in WhatsApp.");
+  } catch {
+    prompt("Copy this bill text:", text);
+  }
+});
+
+document.getElementById("btnWhatsAppBill").addEventListener("click", async () => {
+  if (!currentBillData) return;
+  const res = await ipcRenderer.invoke("bill:openWhatsApp", currentBillData);
+  if (!res?.ok) {
+    alert(res?.error || "Could not open WhatsApp");
+  }
+});
+
 document.getElementById("btnExportExcel").addEventListener("click", async () => {
   if (!currentBillData) return;
   const res = await ipcRenderer.invoke("bill:exportExcel", currentBillData);
@@ -136,21 +182,22 @@ ipcRenderer.on("order-data", (_, payload) => {
   document.getElementById("orderTitle").innerText =
     `Order ${order.code} — ${order.status}`;
 
-  const customer = order.client || {};
+  const customer = order.client || order.customer || {};
   const address = order.address || {};
   const opCity = order.op_city || {};
+  const phones = getCustomerPhones(order);
 
   document.getElementById("customerInfo").innerHTML = `
     <div><b>Name:</b> ${escapeHtml(customer.first_name || "")} ${escapeHtml(customer.last_name || "")}</div>
+    ${formatPhoneLine("Customer Phone", phones.accountPhone, phones.countryCode)}
+    ${formatPhoneLine("Delivery Phone", phones.deliveryPhone, phones.countryCode)}
     <div><b>Email:</b> ${escapeHtml(customer.email || "-")}</div>
-    <div><b>Phone:</b> ${escapeHtml(customer.phone_number || "-")}</div>
     <div><b>Segment:</b> ${escapeHtml(customer.activity_segment || "-")}</div>
     <div><b>Value Segment:</b> ${escapeHtml(customer.value_segment || "-")}</div>
     <hr/>
     <div><b>City:</b> ${escapeHtml(opCity.ref || "-")}</div>
     <div><b>Country:</b> ${escapeHtml(opCity.country || "-")}</div>
-    <div><b>Address Phone:</b> ${escapeHtml(address.phone_number || "-")}</div>
-    <div><b>Country Code:</b> ${escapeHtml(address.country_code || "-")}</div>
+    <div><b>Country Code:</b> ${escapeHtml(phones.countryCode || "-")}</div>
   `;
 
   const a = order.address || {};
@@ -173,6 +220,7 @@ ipcRenderer.on("order-data", (_, payload) => {
 
   const supplierLine = currentBillData
     ? `<div><b>Supplier:</b> ${escapeHtml(currentBillData.supplier_name)}</div>
+       <div><b>Supplier Phone:</b> ${escapeHtml(currentBillData.supplier_phone || "-")}</div>
        <div><b>Supplier Cost:</b> ${formatAmount(currentBillData.total_cost_display, currentBillData.display_currency)}</div>
        <div><b>Supplier Paid:</b> ${currentBillData.supplier_paid ? "Yes" : "No"}</div>`
     : "";

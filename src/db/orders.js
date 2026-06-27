@@ -39,6 +39,7 @@ function computeOrders() {
         service_fee: 0,
         vat: 0,
         incentive: 0,
+        marketing: 0,
         row_count: 0,
         dates: new Set(),
         types: new Set(),
@@ -55,12 +56,14 @@ function computeOrders() {
     else if (ntype === "service_fee") agg.service_fee += amt;
     else if (ntype === "vat") agg.vat += amt;
     else if (ntype === "incentive") agg.incentive += Math.abs(amt);
+    else if (ntype === "marketing") agg.marketing += Math.abs(amt);
   }
 
   const metas = db
     .prepare(
       `
-    SELECT om.order_code, om.supplier_cost, om.supplier_paid, om.supplier_id, s.name AS supplier_name
+    SELECT om.order_code, om.supplier_cost, om.supplier_paid, om.supplier_id,
+           s.name AS supplier_name, s.color AS supplier_color, s.phone AS supplier_phone
     FROM order_meta om
     LEFT JOIN suppliers s ON s.id = om.supplier_id
   `
@@ -75,11 +78,14 @@ function computeOrders() {
       supplier_paid: 0,
       supplier_id: null,
       supplier_name: "",
+      supplier_color: "",
+      supplier_phone: "",
     };
 
     const incentive = agg.incentive || 0;
+    const marketing = agg.marketing || 0;
 
-    const merchant_payout = agg.gross - agg.service_fee - agg.vat + incentive;
+    const merchant_payout = agg.gross - agg.service_fee - agg.vat + incentive - marketing;
 
     const toters_margin = agg.service_fee + agg.vat - incentive;
 
@@ -87,6 +93,7 @@ function computeOrders() {
 
     const datesArr = Array.from(agg.dates).sort();
     const primary_date = datesArr[0] || "";
+    const latest_date = datesArr[datesArr.length - 1] || primary_date;
     const typeList = Array.from(agg.types).filter((t) => t !== "other");
     const expectedTypes = ["gross", "service_fee", "vat"];
     const missingTypes = expectedTypes.filter((t) => !agg.types.has(t));
@@ -96,15 +103,19 @@ function computeOrders() {
       service_fee: agg.service_fee,
       vat: agg.vat,
       incentive: agg.incentive,
+      marketing,
       merchant_payout,
       toters_margin,
       supplier_cost: meta.supplier_cost || 0,
       supplier_paid: meta.supplier_paid ? 1 : 0,
       supplier_id: meta.supplier_id || null,
       supplier_name: meta.supplier_name || "",
+      supplier_color: meta.supplier_color || "",
+      supplier_phone: meta.supplier_phone || "",
       net_profit,
       row_count: agg.row_count,
       primary_date,
+      latest_date,
       dates: datesArr.slice(0, 6).join(" | ") + (datesArr.length > 6 ? " ..." : ""),
       transaction_types: typeList.join(","),
       missing_types: missingTypes.join(","),
@@ -112,7 +123,13 @@ function computeOrders() {
     });
   }
 
-  orders.sort((a, b) => a.order_code.localeCompare(b.order_code));
+  orders.sort((a, b) => {
+    const dateCmp = String(b.latest_date || b.primary_date || "").localeCompare(
+      String(a.latest_date || a.primary_date || "")
+    );
+    if (dateCmp !== 0) return dateCmp;
+    return String(b.order_code || "").localeCompare(String(a.order_code || ""));
+  });
 
   return { orders, settlementsTotal };
 }
@@ -184,6 +201,7 @@ function getTotals(opts = {}) {
     service_fee: 0,
     vat: 0,
     incentive: 0,
+    marketing: 0,
     merchantPayout: 0,
     totersMargin: 0,
     supplierCost: 0,
@@ -202,6 +220,7 @@ function getTotals(opts = {}) {
     totals.service_fee += o.service_fee || 0;
     totals.vat += o.vat || 0;
     totals.incentive += o.incentive || 0;
+    totals.marketing += o.marketing || 0;
     totals.merchantPayout += o.merchant_payout || 0;
     totals.totersMargin += o.toters_margin || 0;
     totals.supplierCost += o.supplier_cost || 0;
@@ -275,6 +294,7 @@ function exportOrdersCsv(destPath) {
     "service_fee",
     "vat",
     "incentive",
+    "marketing",
     "merchant_payout",
     "toters_margin",
     "supplier_cost",
@@ -293,6 +313,7 @@ function exportOrdersCsv(destPath) {
       o.service_fee,
       o.vat,
       o.incentive,
+      o.marketing,
       o.merchant_payout,
       o.toters_margin,
       o.supplier_cost,
@@ -435,6 +456,7 @@ function getOrderBillData(orderCode, apiOrderDetail) {
 
   const supplier_cost_lbp = summary?.supplier_cost || 0;
   const supplier_name = summary?.supplier_name || "(Unassigned)";
+  const supplier_phone = summary?.supplier_phone || "";
   const supplier_paid = !!(summary?.supplier_paid);
 
   const db = getDb();
@@ -482,6 +504,7 @@ function getOrderBillData(orderCode, apiOrderDetail) {
   return {
     order_code: orderCode,
     supplier_name,
+    supplier_phone,
     supplier_cost_lbp,
     supplier_cost_usd: supplier_cost_lbp / usdToLbpRate,
     supplier_paid,

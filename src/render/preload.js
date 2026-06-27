@@ -12,11 +12,16 @@ contextBridge.exposeInMainWorld("api", {
   ordersUpsertMeta: (payload) => ipcRenderer.invoke("orderMeta:set", payload),
   resetSupplierMeta: () => ipcRenderer.invoke("supplier:reset"),
   suppliersGetAll: () => ipcRenderer.invoke("suppliers:getAll"),
-  suppliersCreate: (name) => ipcRenderer.invoke("suppliers:create", name),
+  suppliersCreate: (payload) => ipcRenderer.invoke("suppliers:create", payload),
+  suppliersUpdate: (payload) => ipcRenderer.invoke("suppliers:update", payload),
   suppliersRename: (id, name) => ipcRenderer.invoke("suppliers:rename", { id, name }),
   suppliersDelete: (id) => ipcRenderer.invoke("suppliers:delete", id),
   suppliersGetSummary: (opts) => ipcRenderer.invoke("suppliers:getSummary", opts || {}),
   openSuppliers: () => ipcRenderer.invoke("open-suppliers"),
+  openSettlements: () => ipcRenderer.invoke("open-settlements"),
+  openTransactions: () => ipcRenderer.invoke("open-transactions"),
+  transactionsGetSettlements: () => ipcRenderer.invoke("transactions:getSettlements"),
+  transactionsGetAll: (opts) => ipcRenderer.invoke("transactions:getAll", opts || {}),
 
   // Export / backup
   exportCsv: () => ipcRenderer.invoke("export:csv"),

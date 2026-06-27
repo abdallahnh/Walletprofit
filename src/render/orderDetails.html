@@ -145,7 +145,7 @@
     }
 
     .status-paid { color: #155724; font-weight: 600; }
-    .status-unpaid { color: #b00020; font-weight: 600; }
+    .btn-whatsapp { background: #25d366; color: #fff; }
 
     @media print {
       body * { visibility: hidden; }
@@ -194,6 +194,8 @@
   <div id="billModal" class="bill-modal" role="dialog">
     <div class="bill-toolbar">
       <h3>Supplier Payment Bill</h3>
+      <button class="btn-outline" id="btnCopyBill">Copy for WhatsApp</button>
+      <button class="btn-whatsapp" id="btnWhatsAppBill">Send WhatsApp</button>
       <button class="btn-outline" id="btnPrintBill">Print</button>
       <button class="btn-outline" id="btnExportExcel">Save Excel</button>
       <button class="btn-outline" id="btnExportWord">Save Word</button>

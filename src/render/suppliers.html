@@ -27,11 +27,12 @@ button {
   border: 1px solid #ddd;
   border-radius: 8px;
   font-size: 12px;
-  min-width: 200px;
+  min-width: 140px;
 }
+.color-inp { width: 48px; min-width: 48px; padding: 2px; height: 34px; }
 .wrap {
   overflow: auto;
-  max-height: calc(100vh - 180px);
+  max-height: calc(100vh - 220px);
   border: 1px solid #eee;
   border-radius: 12px;
 }
@@ -41,18 +42,29 @@ th, td {
   padding: 10px 8px;
   font-size: 12px;
   text-align: left;
+  vertical-align: middle;
 }
 th { position: sticky; top: 0; background: #fafafa; }
 .error { color: #b00020; font-size: 12px; margin: 8px 0; }
 .msg { color: #155724; font-size: 12px; margin: 8px 0; }
+.color-preview {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+  vertical-align: middle;
+}
 </style>
 </head>
 <body>
   <h1>Suppliers</h1>
-  <p class="muted">Manage suppliers here. They appear in the wallet transactions dropdown.</p>
+  <p class="muted">Set a color and phone for each supplier. Colors appear in the wallet view; phone is used for WhatsApp bills.</p>
 
   <div class="row">
-    <input type="text" id="inpNewSupplier" class="inp" placeholder="New supplier name" />
+    <input type="text" id="inpNewSupplier" class="inp" placeholder="Supplier name" />
+    <input type="color" id="inpNewColor" class="color-inp" value="#dbeafe" title="Color" />
+    <input type="text" id="inpNewPhone" class="inp" placeholder="Phone (WhatsApp)" />
     <button class="primary" id="btnAdd">Add Supplier</button>
     <button class="secondary" id="btnRefresh">Refresh</button>
   </div>
@@ -64,9 +76,11 @@ th { position: sticky; top: 0; background: #fafafa; }
     <table>
       <thead>
         <tr>
+          <th>Color</th>
           <th>Name</th>
+          <th>Phone</th>
           <th>Created</th>
-          <th style="width: 160px;">Actions</th>
+          <th style="width: 140px;">Actions</th>
         </tr>
       </thead>
       <tbody id="tbody"></tbody>
@@ -76,6 +90,8 @@ th { position: sticky; top: 0; background: #fafafa; }
   <script>
     const tbody = document.getElementById("tbody");
     const inpNew = document.getElementById("inpNewSupplier");
+    const inpNewColor = document.getElementById("inpNewColor");
+    const inpNewPhone = document.getElementById("inpNewPhone");
     const errEl = document.getElementById("err");
     const msgEl = document.getElementById("msg");
 
@@ -96,7 +112,13 @@ th { position: sticky; top: 0; background: #fafafa; }
       tbody.innerHTML = rows.map((s) => `
         <tr data-id="${s.id}">
           <td>
+            <input class="color-inp" type="color" data-edit-color value="${escapeHtml(s.color || "#e8f4fc")}" />
+          </td>
+          <td>
             <input class="inp" type="text" data-edit-name value="${escapeHtml(s.name)}" style="min-width: 0; width: 100%;" />
+          </td>
+          <td>
+            <input class="inp" type="text" data-edit-phone value="${escapeHtml(s.phone || "")}" placeholder="Phone" style="min-width: 0; width: 100%;" />
           </td>
           <td>${escapeHtml((s.created_at || "").slice(0, 10))}</td>
           <td>
@@ -111,8 +133,10 @@ th { position: sticky; top: 0; background: #fafafa; }
           const tr = btn.closest("tr");
           const id = Number(tr.getAttribute("data-id"));
           const name = tr.querySelector("[data-edit-name]").value.trim();
+          const color = tr.querySelector("[data-edit-color]").value;
+          const phone = tr.querySelector("[data-edit-phone]").value.trim();
           if (!name) { setErr("Name cannot be empty"); return; }
-          const res = await window.api.suppliersRename(id, name);
+          const res = await window.api.suppliersUpdate({ id, name, color, phone });
           if (res?.ok === false) { setErr(res.error); return; }
           setMsg("Supplier updated.");
           await load();
@@ -137,9 +161,14 @@ th { position: sticky; top: 0; background: #fafafa; }
       setMsg("");
       const name = inpNew.value.trim();
       if (!name) { setErr("Enter a supplier name"); return; }
-      const res = await window.api.suppliersCreate(name);
+      const res = await window.api.suppliersCreate({
+        name,
+        color: inpNewColor.value,
+        phone: inpNewPhone.value.trim(),
+      });
       if (res?.ok === false) { setErr(res.error); return; }
       inpNew.value = "";
+      inpNewPhone.value = "";
       setMsg(`Supplier "${name}" added.`);
       await load();
     });
