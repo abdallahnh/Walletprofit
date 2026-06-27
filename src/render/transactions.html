@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Transactions</title>
+<style>
+body {
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  margin: 16px;
+  background: #fff;
+}
+h1 { font-size: 18px; margin: 0 0 8px; }
+.muted { color: #666; font-size: 12px; margin-bottom: 12px; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0; align-items: center; }
+button {
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.primary { background: #111; color: #fff; }
+.secondary { background: #eee; }
+.inp {
+  padding: 8px 10px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 12px;
+  min-width: 180px;
+}
+.wrap {
+  overflow: auto;
+  max-height: calc(100vh - 200px);
+  border: 1px solid #eee;
+  border-radius: 12px;
+}
+table { width: 100%; border-collapse: collapse; }
+th, td {
+  border-bottom: 1px solid #e6e6e6;
+  padding: 10px 8px;
+  font-size: 12px;
+  text-align: left;
+  vertical-align: top;
+}
+th { position: sticky; top: 0; background: #fafafa; }
+td.num { text-align: right; white-space: nowrap; }
+.error { color: #b00020; font-size: 12px; margin: 8px 0; }
+.order-link {
+  color: #0b57d0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.type-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #f0f0f0;
+  font-size: 11px;
+}
+</style>
+</head>
+<body>
+  <h1>All Transactions</h1>
+  <p class="muted">Browse every wallet transaction. Filter by type and open related order details when available.</p>
+
+  <div class="row">
+    <select id="selType" class="inp">
+      <option value="all">All types</option>
+      <option value="gross">Gross</option>
+      <option value="service_fee">Service fee</option>
+      <option value="vat">VAT</option>
+      <option value="incentive">Incentive</option>
+      <option value="marketing">Marketing</option>
+      <option value="settlement">Settlement</option>
+      <option value="other">Other</option>
+    </select>
+    <select id="selCurrency" class="inp">
+      <option value="USD">USD</option>
+      <option value="LBP">LBP</option>
+    </select>
+    <button class="secondary" id="btnRefresh">Refresh</button>
+    <span class="muted" id="countLabel"></span>
+  </div>
+
+  <div id="err" class="error"></div>
+
+  <div class="wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Type</th>
+          <th style="text-align: right;">Amount</th>
+          <th>Order</th>
+          <th>Wallet</th>
+          <th>Reason</th>
+          <th style="width: 100px;">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <script>
+    const tbody = document.getElementById("tbody");
+    const errEl = document.getElementById("err");
+    const selType = document.getElementById("selType");
+    const selCurrency = document.getElementById("selCurrency");
+    const countLabel = document.getElementById("countLabel");
+
+    let usdToLbpRate = 90000;
+    let displayCurrency = "USD";
+
+    const TYPE_LABELS = {
+      gross: "Gross",
+      service_fee: "Service fee",
+      vat: "VAT",
+      incentive: "Incentive",
+      marketing: "Marketing",
+      settlement: "Settlement",
+      other: "Other",
+    };
+
+    function setErr(e) { errEl.textContent = e ? String(e) : ""; }
+
+    function escapeHtml(str) {
+      return String(str || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function fmtAmount(n) {
+      const x = Number(n) || 0;
+      if (displayCurrency === "USD") {
+        return (x / usdToLbpRate).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      }
+      return x.toLocaleString() + " L.L";
+    }
+
+    function fmtDate(iso) {
+      if (!iso) return "";
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return String(iso).slice(0, 19);
+      return d.toLocaleString();
+    }
+
+    async function loadConfig() {
+      const cfg = await window.api.walletGetConfig();
+      usdToLbpRate = Number(cfg?.usdToLbpRate || 90000);
+      displayCurrency = cfg?.displayCurrency || "USD";
+      selCurrency.value = displayCurrency;
+    }
+
+    async function load() {
+      setErr("");
+      const type = selType.value || "all";
+      const rows = await window.api.transactionsGetAll({ type });
+
+      countLabel.textContent = `${rows.length} transaction${rows.length === 1 ? "" : "s"}`;
+
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="7" class="muted">No transactions found.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = rows.map((r) => {
+        const orderCode = r.order_code || "";
+        const typeLabel = TYPE_LABELS[r.normalized_type] || r.normalized_type || "Other";
+        const orderCell = orderCode
+          ? `<span class="order-link" data-order="${escapeHtml(orderCode)}">${escapeHtml(orderCode)}</span>`
+          : "";
+        const viewBtn = orderCode
+          ? `<button class="primary" data-view-order="${escapeHtml(orderCode)}">View Order</button>`
+          : "";
+
+        return `
+          <tr>
+            <td>${escapeHtml(fmtDate(r.created_at))}</td>
+            <td><span class="type-pill">${escapeHtml(typeLabel)}</span><div class="muted">${escapeHtml(r.type || "")}</div></td>
+            <td class="num">${escapeHtml(fmtAmount(r.amount))}</td>
+            <td>${orderCell}</td>
+            <td>${escapeHtml(r.wallet || "")}</td>
+            <td>${escapeHtml(r.reason || "")}</td>
+            <td>${viewBtn}</td>
+          </tr>
+        `;
+      }).join("");
+
+      tbody.querySelectorAll("[data-view-order], [data-order]").forEach((el) => {
+        el.addEventListener("click", async () => {
+          const code = el.getAttribute("data-view-order") || el.getAttribute("data-order");
+          if (!code) return;
+          await window.api.openOrder(code);
+        });
+      });
+    }
+
+    selType.addEventListener("change", () => load().catch(setErr));
+    selCurrency.addEventListener("change", () => {
+      displayCurrency = selCurrency.value;
+      load().catch(setErr);
+    });
+    document.getElementById("btnRefresh").addEventListener("click", () => load().catch(setErr));
+
+    loadConfig().then(load).catch(setErr);
+  </script>
+</body>
+</html>
