@@ -697,6 +697,7 @@ ipcMain.handle("products:importExcel", async () => {
 ipcMain.handle("wallet:getConfig", () => walletDb.getWalletConfig());
 ipcMain.handle("wallet:saveConfig", (_evt, cfg) => walletDb.saveWalletConfig(cfg));
 ipcMain.handle("wallet:sync", () => walletDb.syncWallet());
+ipcMain.handle("wallet:getRemainingBalance", () => walletDb.fetchRemainingBalanceFromToters());
 
 ipcMain.handle("products:import", (_evt, rows) => productsDb.importProducts(rows));
 ipcMain.handle("products:get", () => productsDb.getProducts());

@@ -251,6 +251,70 @@ async function syncWallet() {
   return { ok: true, pages, totalFetched, totalInserted, totalIgnored };
 }
 
+function parseWalletSummaryEntry(storeData, walletName) {
+  const summary = storeData?.summary || [];
+  const row = summary.find((s) => s.wallet === walletName) || summary[0];
+  if (!row) return null;
+
+  const rawAmount = Number(row.amount) || 0;
+  // Negative wallet balance = Toters still owes the merchant (not yet settled via BOB).
+  const remainingFromTotersLbp = rawAmount < 0 ? Math.abs(rawAmount) : 0;
+
+  return {
+    raw_amount_lbp: rawAmount,
+    remaining_from_toters_lbp: remainingFromTotersLbp,
+    wallet: row.wallet || walletName,
+    store_name: storeData?.store?.ref || "",
+    currency_ref: storeData?.store?.currency?.ref || "LBP",
+  };
+}
+
+async function fetchRemainingBalanceFromToters() {
+  const cfg = getWalletConfig();
+  if (!cfg?.baseUrl || !cfg?.storeId || !cfg?.token) {
+    return { ok: false, error: "Missing config: baseUrl/storeId/token (open Wallet Settings)" };
+  }
+
+  const base = String(cfg.baseUrl).replace(/\/$/, "");
+  const url = `${base}/api/retailer/stores-wallets-summary`;
+  const storeId = String(cfg.storeId);
+  const walletName = cfg.wallet || "main";
+
+  const resp = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${cfg.token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => "");
+    return { ok: false, error: `Fetch failed (${resp.status}): ${txt.slice(0, 240)}` };
+  }
+
+  const json = await resp.json();
+  const storeData = json?.data?.[storeId] || json?.data?.[Number(storeId)];
+  if (!storeData) {
+    return { ok: false, error: `Store ${storeId} not found in wallets summary` };
+  }
+
+  const parsed = parseWalletSummaryEntry(storeData, walletName);
+  if (!parsed) {
+    return { ok: false, error: `No wallet summary for store ${storeId}` };
+  }
+
+  return {
+    ok: true,
+    store_id: storeId,
+    store_name: parsed.store_name,
+    wallet: parsed.wallet,
+    currency_ref: parsed.currency_ref,
+    raw_amount_lbp: parsed.raw_amount_lbp,
+    remaining_from_toters_lbp: parsed.remaining_from_toters_lbp,
+    fetched_at: new Date().toISOString(),
+  };
+}
+
 function collectBackupData() {
   const db = getDb();
 
@@ -600,6 +664,7 @@ module.exports = {
   getWalletConfig,
   saveWalletConfig,
   syncWallet,
+  fetchRemainingBalanceFromToters,
   exportBackupJson,
   exportSqliteBackup,
   importBackupJsonFromFile,

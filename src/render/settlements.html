@@ -40,6 +40,12 @@ button {
 }
 .summary .label { font-size: 11px; color: #666; margin-bottom: 4px; }
 .summary .value { font-size: 18px; font-weight: 600; }
+.summary .card.highlight {
+  border-color: #cfe2ff;
+  background: #e8f4ff;
+}
+.summary .card.highlight .value { color: #0d47a1; }
+.summary .card.highlight .label { color: #0d47a1; font-weight: 600; }
 .wrap {
   overflow: auto;
   max-height: calc(100vh - 220px);
@@ -72,15 +78,21 @@ td.num { text-align: right; white-space: nowrap; }
   </div>
 
   <div class="summary">
+    <div class="card highlight">
+      <div class="label">Remaining Balance From Toters</div>
+      <div class="value" id="remainingFromToters">—</div>
+    </div>
     <div class="card">
-      <div class="label">Total Settlements</div>
+      <div class="label">Total Settlements (BOB)</div>
       <div class="value" id="totalAmount">—</div>
     </div>
     <div class="card">
-      <div class="label">Count</div>
+      <div class="label">Settlement Count</div>
       <div class="value" id="totalCount">—</div>
     </div>
   </div>
+
+  <p class="muted" id="remainingHint">Amount still owed by Toters (wallet API) — not yet transferred via BOB.</p>
 
   <div id="err" class="error"></div>
 
@@ -104,6 +116,8 @@ td.num { text-align: right; white-space: nowrap; }
     const errEl = document.getElementById("err");
     const totalAmountEl = document.getElementById("totalAmount");
     const totalCountEl = document.getElementById("totalCount");
+    const remainingEl = document.getElementById("remainingFromToters");
+    const remainingHintEl = document.getElementById("remainingHint");
     const selCurrency = document.getElementById("selCurrency");
 
     let usdToLbpRate = 90000;
@@ -141,9 +155,29 @@ td.num { text-align: right; white-space: nowrap; }
       selCurrency.value = displayCurrency;
     }
 
+    async function loadRemainingBalance() {
+      const res = await window.api.walletGetRemainingBalance();
+      if (!res?.ok) {
+        remainingEl.textContent = "—";
+        if (remainingHintEl) {
+          remainingHintEl.textContent = res?.error || "Could not load Toters wallet balance";
+        }
+        return;
+      }
+      remainingEl.textContent = fmtAmount(res.remaining_from_toters_lbp);
+      if (remainingHintEl) {
+        const storeLabel = res.store_name ? `${res.store_name} · ` : "";
+        remainingHintEl.textContent =
+          `${storeLabel}wallet "${res.wallet}" · API balance ${Number(res.raw_amount_lbp || 0).toLocaleString()} L.L — pending BOB transfer`;
+      }
+    }
+
     async function load() {
       setErr("");
-      const data = await window.api.transactionsGetSettlements();
+      const [data] = await Promise.all([
+        window.api.transactionsGetSettlements(),
+        loadRemainingBalance(),
+      ]);
 
       totalAmountEl.textContent = fmtAmount(data.total);
       totalCountEl.textContent = String(data.count || 0);

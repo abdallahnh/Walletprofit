@@ -185,6 +185,31 @@ function setError(e) {
   err.textContent = e ? String(e) : "";
 }
 
+async function loadTotersRemainingBalance() {
+  const valueEl = $("totersRemainingBalance");
+  const hintEl = $("totersBalanceHint");
+  if (!valueEl) return;
+
+  try {
+    const res = await window.api.walletGetRemainingBalance();
+    if (!res?.ok) {
+      valueEl.textContent = "—";
+      if (hintEl) hintEl.textContent = res?.error || "Could not load Toters wallet balance";
+      return;
+    }
+
+    valueEl.textContent = fmt(res.remaining_from_toters_lbp);
+    if (hintEl) {
+      const storeLabel = res.store_name ? `${res.store_name} · ` : "";
+      hintEl.textContent =
+        `${storeLabel}wallet "${res.wallet}" · API balance ${Number(res.raw_amount_lbp || 0).toLocaleString()} L.L — pending BOB transfer`;
+    }
+  } catch (e) {
+    valueEl.textContent = "—";
+    if (hintEl) hintEl.textContent = String(e);
+  }
+}
+
 function setStats(t) {
   const includeSettlements = chkSettlements.checked;
 
@@ -582,6 +607,7 @@ async function refresh() {
   renderRows(currentRowsView);
   setStats(calculateTotalsFromRows(currentRowsView, includeSettlements));
   renderSupplierSummary(currentRowsView);
+  loadTotersRemainingBalance().catch((e) => console.error("Toters balance:", e));
 }
 
 async function refreshViewFromCache() {

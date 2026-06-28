@@ -41,6 +41,7 @@ contextBridge.exposeInMainWorld("api", {
   walletGetConfig: () => ipcRenderer.invoke("wallet:getConfig"),
   walletSaveConfig: (cfg) => ipcRenderer.invoke("wallet:saveConfig", cfg),
   walletSync: () => ipcRenderer.invoke("wallet:sync"),
+  walletGetRemainingBalance: () => ipcRenderer.invoke("wallet:getRemainingBalance"),
   openOrder: (code) => ipcRenderer.invoke("open-order", code),
 
   openProducts: () => ipcRenderer.invoke("open-products"),
