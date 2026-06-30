@@ -12,6 +12,7 @@ const {
   getItemCountsByOrder,
   getSalesItemCount,
   ensureLineMetaFromSales,
+  getOrderItemsMap,
 } = require("./orderLineMeta");
 
 function computeOrders() {
@@ -82,6 +83,7 @@ function computeOrders() {
     .all();
   const metaMap = new Map(metas.map((m) => [m.order_code, m]));
   const multiItemOrders = getItemCountsByOrder();
+  const orderItemsMap = getOrderItemsMap(db);
 
   const orders = [];
   for (const agg of byOrder.values()) {
@@ -103,14 +105,32 @@ function computeOrders() {
 
     const lineTotals = getOrderLineTotals(agg.order_code);
     if (lineTotals.has_lines) {
+      const salesRows = db
+        .prepare(
+          `
+        SELECT barcode, total_sale
+        FROM sales
+        WHERE order_code = ?
+      `
+        )
+        .all(agg.order_code);
+      const salesByBarcode = new Map(
+        salesRows.map((s) => [s.barcode, Number(s.total_sale || 0)])
+      );
+
       meta.supplier_cost = lineTotals.supplier_cost;
       meta.supplier_paid = lineTotals.supplier_paid;
       meta.supplier_id = lineTotals.supplier_id;
       meta.supplier_name = lineTotals.supplier_name;
       meta.supplier_line_ids = lineTotals.supplier_line_ids;
       meta.is_multi_supplier = lineTotals.is_multi_supplier;
-      meta.line_meta = lineTotals.lines;
+      meta.line_meta = lineTotals.lines.map((l) => ({
+        ...l,
+        total_sale: salesByBarcode.get(l.barcode) || 0,
+      }));
     }
+
+    const orderItems = orderItemsMap.get(agg.order_code) || [];
 
     const incentive = agg.incentive || 0;
     const marketing = agg.marketing || 0;
@@ -157,6 +177,7 @@ function computeOrders() {
       is_multi_supplier: !!meta.is_multi_supplier || itemCount > 1,
       supplier_line_ids: meta.supplier_line_ids || (meta.supplier_id ? [meta.supplier_id] : []),
       line_meta: meta.line_meta || [],
+      order_items: orderItems,
     });
   }
 
@@ -259,22 +280,9 @@ function getSupplierSummary(opts = {}) {
   const bySupplier = new Map();
 
   for (const o of filtered) {
-    if (o.is_multi_supplier && Array.isArray(o.line_meta) && o.line_meta.length > 0) {
-      const db = getDb();
-      const salesRows = db
-        .prepare(
-          `
-        SELECT barcode, total_sale
-        FROM sales
-        WHERE order_code = ?
-      `
-        )
-        .all(o.order_code);
-      const salesByBarcode = new Map(
-        salesRows.map((s) => [s.barcode, Number(s.total_sale || 0)])
-      );
+    if (o.is_splittable && Array.isArray(o.line_meta) && o.line_meta.length > 0) {
       const salesTotal =
-        [...salesByBarcode.values()].reduce((sum, v) => sum + v, 0) ||
+        o.line_meta.reduce((sum, l) => sum + Number(l.total_sale || 0), 0) ||
         o.line_meta.length;
 
       for (const line of o.line_meta) {
@@ -297,7 +305,7 @@ function getSupplierSummary(opts = {}) {
 
         const share =
           salesTotal > 0
-            ? (salesByBarcode.get(line.barcode) || 0) / salesTotal
+            ? Number(line.total_sale || 0) / salesTotal
             : 1 / o.line_meta.length;
         const row = bySupplier.get(key);
         row.orders += share;

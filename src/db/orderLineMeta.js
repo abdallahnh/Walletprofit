@@ -106,7 +106,7 @@ function getOrderLineTotals(orderCode) {
         ? "(Unassigned)"
         : names.length === 1
           ? names[0]
-          : `Multi (${names.length})`,
+          : names.join(", "),
     is_multi_supplier: supplierIds.length > 1 || lines.length > 1,
     lines,
   };
@@ -184,6 +184,31 @@ function getItemCountsByOrder() {
   return new Map(rows.map((r) => [r.order_code, Number(r.item_count)]));
 }
 
+function getOrderItemsMap(db) {
+  const rows = db
+    .prepare(
+      `
+    SELECT s.order_code, s.barcode, s.quantity, p.item_name
+    FROM sales s
+    LEFT JOIN products p ON p.id = s.product_id
+    WHERE s.order_code IS NOT NULL AND s.barcode IS NOT NULL AND s.barcode != ''
+    ORDER BY s.order_code, p.item_name, s.barcode
+  `
+    )
+    .all();
+
+  const map = new Map();
+  for (const r of rows) {
+    if (!map.has(r.order_code)) map.set(r.order_code, []);
+    map.get(r.order_code).push({
+      barcode: r.barcode,
+      item_name: r.item_name || r.barcode,
+      quantity: Number(r.quantity || 0),
+    });
+  }
+  return map;
+}
+
 module.exports = {
   getLineMetaForOrder,
   getOrderLineTotals,
@@ -193,4 +218,5 @@ module.exports = {
   clearLineMetaForOrder,
   getItemCountsByOrder,
   getSalesItemCount,
+  getOrderItemsMap,
 };

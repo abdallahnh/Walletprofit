@@ -40,7 +40,7 @@ let summarySortDir = "asc";
 let supplierFilter = null;
 let supplierColorById = new Map();
 let selectedOrderCode = null;
-let expandedLineOrders = new Set();
+let expandedItemOrders = new Set();
 let lineMetaCache = new Map();
 
 const COLUMN_DEFS = [
@@ -290,7 +290,11 @@ function getFilteredRows(rows) {
     }
 
     if (supplierIds && supplierIds.length > 0) {
-      if (!r.supplier_id || !supplierIds.includes(r.supplier_id)) return false;
+      const lineIds = r.supplier_line_ids || [];
+      const matches =
+        (r.supplier_id && supplierIds.includes(r.supplier_id)) ||
+        lineIds.some((id) => supplierIds.includes(id));
+      if (!matches) return false;
     }
 
     if (paidFilter === "paid" && !r.supplier_paid) return false;
@@ -359,6 +363,41 @@ function renderSupplierSummary(rows) {
   const bySupplier = new Map();
 
   for (const o of rows) {
+    if (o.is_splittable && Array.isArray(o.line_meta) && o.line_meta.length > 0) {
+      const salesTotal =
+        o.line_meta.reduce((sum, l) => sum + Number(l.total_sale || 0), 0) ||
+        o.line_meta.length;
+
+      for (const line of o.line_meta) {
+        const key = line.supplier_id || 0;
+        const name = line.supplier_name || "(Unassigned)";
+
+        if (!bySupplier.has(key)) {
+          bySupplier.set(key, {
+            supplier_name: name,
+            orders: 0,
+            revenue: 0,
+            supplier_cost: 0,
+            payable: 0,
+            profit: 0,
+          });
+        }
+
+        const share =
+          salesTotal > 0
+            ? Number(line.total_sale || 0) / salesTotal
+            : 1 / o.line_meta.length;
+        const row = bySupplier.get(key);
+        row.orders += share;
+        row.revenue += Math.round((o.merchant_payout || 0) * share);
+        row.supplier_cost += Number(line.supplier_cost_lbp || 0);
+        if (!line.supplier_paid) row.payable += Number(line.supplier_cost_lbp || 0);
+        row.profit +=
+          Math.round((o.merchant_payout || 0) * share) - Number(line.supplier_cost_lbp || 0);
+      }
+      continue;
+    }
+
     const key = o.supplier_id || 0;
     const name = o.supplier_name || "(Unassigned)";
 
@@ -446,47 +485,63 @@ function buildSupplierSelectHtml(selectedId, extraAttrs = "") {
   return options.join("");
 }
 
-function renderLineMetaSubRow(orderCode, lines) {
+function renderItemSubRow(orderCode, orderItems, lines, isSplit) {
   const tr = document.createElement("tr");
   tr.className = "line-sub-row";
   tr.setAttribute("data-order", orderCode);
 
-  const rowsHtml = (lines || [])
-    .map(
-      (line) => `
-    <tr data-barcode="${escapeHtml(line.barcode)}">
-      <td>${escapeHtml(line.item_name || line.barcode)}</td>
-      <td>${escapeHtml(line.barcode || "")}</td>
+  const lineByBarcode = new Map((lines || []).map((l) => [l.barcode, l]));
+  const items =
+    (orderItems || []).length > 0
+      ? orderItems
+      : (lines || []).map((l) => ({
+          barcode: l.barcode,
+          item_name: l.item_name || l.barcode,
+          quantity: 1,
+        }));
+
+  const rowsHtml = items
+    .map((item) => {
+      const line = lineByBarcode.get(item.barcode) || {};
+      if (isSplit) {
+        return `
+    <tr data-barcode="${escapeHtml(item.barcode)}">
+      <td>${escapeHtml(item.item_name || item.barcode)}</td>
+      <td>${escapeHtml(item.barcode || "")}</td>
       <td>
-        <select class="inp sel-supplier-line" data-order="${escapeHtml(orderCode)}" data-barcode="${escapeHtml(line.barcode)}" style="min-width:120px;width:100%;">
+        <select class="inp sel-supplier-line" data-order="${escapeHtml(orderCode)}" data-barcode="${escapeHtml(item.barcode)}" style="min-width:120px;width:100%;">
           ${buildSupplierSelectHtml(line.supplier_id)}
         </select>
       </td>
       <td class="num">
         <input class="inp inp-line-cost" type="number" step="${currentCurrency === "USD" ? "0.01" : "1"}" min="0"
-          data-order="${escapeHtml(orderCode)}" data-barcode="${escapeHtml(line.barcode)}"
+          data-order="${escapeHtml(orderCode)}" data-barcode="${escapeHtml(item.barcode)}"
           value="${supplierCostLbpToDisplay(line.supplier_cost_lbp)}" />
       </td>
       <td style="text-align:center;">
-        <input type="checkbox" class="inp-line-paid" data-order="${escapeHtml(orderCode)}" data-barcode="${escapeHtml(line.barcode)}" ${line.supplier_paid ? "checked" : ""} />
+        <input type="checkbox" class="inp-line-paid" data-order="${escapeHtml(orderCode)}" data-barcode="${escapeHtml(item.barcode)}" ${line.supplier_paid ? "checked" : ""} />
       </td>
-    </tr>`
-    )
+    </tr>`;
+      }
+
+      return `
+    <tr data-barcode="${escapeHtml(item.barcode)}">
+      <td>${escapeHtml(item.item_name || item.barcode)}</td>
+      <td>${escapeHtml(item.barcode || "")}</td>
+      <td class="num">${item.quantity || 1}</td>
+    </tr>`;
+    })
     .join("");
+
+  const headers = isSplit
+    ? `<tr><th>Item</th><th>Barcode</th><th>Supplier</th><th class="num">Cost</th><th>Paid</th></tr>`
+    : `<tr><th>Item</th><th>Barcode</th><th class="num">Qty</th></tr>`;
 
   tr.innerHTML = `
     <td colspan="15">
       <table class="line-meta-inner">
-        <thead>
-          <tr>
-            <th>Item</th>
-            <th>Barcode</th>
-            <th>Supplier</th>
-            <th class="num">Cost</th>
-            <th>Paid</th>
-          </tr>
-        </thead>
-        <tbody>${rowsHtml}</tbody>
+        <thead>${headers}</thead>
+        <tbody>${rowsHtml || '<tr><td colspan="5" style="text-align:center;color:#888;">No synced items for this order</td></tr>'}</tbody>
       </table>
     </td>`;
 
@@ -517,20 +572,22 @@ async function saveLineMeta(orderCode, barcode) {
     return;
   }
 
-  await refreshViewFromCache();
-  expandedLineOrders.add(orderCode);
+  allRowsCache = await window.api.ordersGetReconciliation();
+  expandedItemOrders.add(orderCode);
   const meta = await window.api.ordersGetLineMeta(orderCode);
   lineMetaCache.set(orderCode, meta.lines || []);
-  renderRows(currentRowsView);
+  await refreshViewFromCache();
 }
 
-async function toggleLineExpand(orderCode) {
-  if (expandedLineOrders.has(orderCode)) {
-    expandedLineOrders.delete(orderCode);
+async function toggleItemExpand(orderCode, isSplit) {
+  if (expandedItemOrders.has(orderCode)) {
+    expandedItemOrders.delete(orderCode);
   } else {
-    expandedLineOrders.add(orderCode);
-    const meta = await window.api.ordersGetLineMeta(orderCode);
-    lineMetaCache.set(orderCode, meta.lines || []);
+    expandedItemOrders.add(orderCode);
+    if (isSplit) {
+      const meta = await window.api.ordersGetLineMeta(orderCode);
+      lineMetaCache.set(orderCode, meta.lines || []);
+    }
   }
   renderRows(currentRowsView);
 }
@@ -557,14 +614,17 @@ function renderRows(rows) {
     const negativeProfit = Number(r.net_profit || 0) < 0;
     tr.setAttribute("data-order", r.order_code);
 
-    const isSplit = r.is_splittable || r.is_multi_supplier;
+    const isSplit = r.is_splittable;
+    const itemCount = r.item_count || (r.order_items || []).length || 0;
+    const itemsBtn =
+      itemCount > 0
+        ? `<button type="button" class="view-btn btn-items" data-items-order="${r.order_code}" title="Show items">
+            Items (${itemCount})
+          </button>`
+        : "";
+
     const supplierCell = isSplit
-      ? `<div class="split-supplier-cell">
-          <span class="multi-label">${escapeHtml(r.supplier_name || "Split by item")}</span>
-          <button type="button" class="view-btn btn-lines" data-lines-order="${r.order_code}">
-            Lines (${r.item_count || "?"})
-          </button>
-        </div>`
+      ? `<span class="multi-label">${escapeHtml(r.supplier_name || "Assign per item")}</span>`
       : `<select class="sel-supplier" data-order="${r.order_code}" data-kind="supplier">${buildSupplierSelectHtml(r.supplier_id)}</select>`;
 
     const costCell = isSplit
@@ -581,7 +641,12 @@ function renderRows(rows) {
   <button class="view-btn" data-code="${r.order_code}">
     View
   </button></td>
-      <td data-col="order" class="${negativeProfit ? "order-code-negative" : ""}">${r.order_code}${r.has_adjusted_items ? `<span class="order-adjusted-mark" title="${Number(r.adjusted_items_count || 0)} adjusted item(s)">✦</span>` : ""}</td>
+      <td data-col="order" class="${negativeProfit ? "order-code-negative" : ""}">
+        <div class="order-cell-inner">
+          <span>${r.order_code}${r.has_adjusted_items ? `<span class="order-adjusted-mark" title="${Number(r.adjusted_items_count || 0)} adjusted item(s)">✦</span>` : ""}</span>
+          ${itemsBtn}
+        </div>
+      </td>
       <td data-col="supplier">${supplierCell}</td>
       <td class="num" data-col="gross">${fmtNumHideZero(r.gross)}</td>
       <td class="num" data-col="service">${fmtNumHideZero(r.service_fee)}</td>
@@ -599,19 +664,20 @@ function renderRows(rows) {
 
     tbody.appendChild(tr);
 
-    if (isSplit && expandedLineOrders.has(r.order_code)) {
+    if (expandedItemOrders.has(r.order_code)) {
       const lines = lineMetaCache.get(r.order_code) || r.line_meta || [];
-      const subTr = renderLineMetaSubRow(r.order_code, lines);
+      const subTr = renderItemSubRow(r.order_code, r.order_items || [], lines, isSplit);
       tbody.appendChild(subTr);
     }
   }
 
-  document.querySelectorAll(".btn-lines").forEach((btn) => {
+  document.querySelectorAll(".btn-items").forEach((btn) => {
     btn.addEventListener("click", async (e) => {
       e.stopPropagation();
-      const code = btn.getAttribute("data-lines-order");
+      const code = btn.getAttribute("data-items-order");
+      const row = rows.find((r) => r.order_code === code);
       selectRow(code);
-      await toggleLineExpand(code);
+      await toggleItemExpand(code, !!row?.is_splittable);
     });
   });
 
