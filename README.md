@@ -47,5 +47,8 @@ Before upgrading, ask your ops manager to:
 
 Or copy the database file manually from the paths above.
 
+## 9) Mobile (Android — planned)
+A separate Capacitor project lives in `mobile/` and does **not** affect the Mac/Windows Electron build. See [mobile/README.md](mobile/README.md) for architecture, offline SQLite, and export/import between phone and desktop.
+
 **Export CSV** saves order reconciliation (supplier costs, paid flags). **Import Orders CSV** restores those values.
 **Export Data** saves the entire database (recommended for laptop-to-laptop moves).

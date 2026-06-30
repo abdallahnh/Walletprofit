@@ -1,0 +1,21 @@
+{
+  "name": "anwallet-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ANWallet Android app (Capacitor) — separate from desktop Electron build",
+  "scripts": {
+    "sync:ui": "node scripts/sync-ui.js",
+    "build": "node scripts/build-www.js",
+    "cap:sync": "npm run build && npx cap sync android",
+    "cap:open": "npx cap open android",
+    "android": "npm run cap:sync && npm run cap:open"
+  },
+  "capabilities": {
+    "note": "Install Capacitor deps when starting Phase 1: npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor-community/sqlite @capacitor/filesystem @capacitor/share"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.4.1",
+    "@capacitor/cli": "^7.6.7",
+    "@capacitor/core": "^8.4.1"
+  }
+}

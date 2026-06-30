@@ -1,0 +1,11 @@
+{
+  "appId": "com.wallet.profit.mobile",
+  "appName": "Wallet Profit",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": true
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}
