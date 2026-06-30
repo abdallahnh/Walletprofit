@@ -181,6 +181,35 @@ ipcMain.handle("orderMeta:set", async (_evt, payload) => {
   return res;
 });
 
+ipcMain.handle("orders:getLineMeta", async (_evt, orderCode) => {
+  const lines = ordersDb.getLineMetaForOrder(orderCode);
+  return { ok: true, lines };
+});
+
+ipcMain.handle("orders:lineMeta:set", async (_evt, payload) => {
+  const res = ordersDb.upsertLineMeta(payload || {});
+  if (res?.ok === false) return res;
+
+  try {
+    const cfg = walletDb.getWalletConfig();
+    const usdToLbpRate = Number(cfg?.usdToLbpRate || 90000);
+    salesDb.applyLineSupplierCost(
+      payload?.order_code,
+      payload?.barcode,
+      payload?.supplier_cost_lbp,
+      usdToLbpRate
+    );
+  } catch (e) {
+    logger.error("Failed to apply line supplier cost on sales row", {
+      order_code: payload?.order_code,
+      barcode: payload?.barcode,
+      error: String(e),
+    });
+  }
+
+  return res;
+});
+
 ipcMain.handle("supplier:reset", async () => {
   return ordersDb.resetSupplierMeta();
 });

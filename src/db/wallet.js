@@ -324,6 +324,7 @@ function collectBackupData() {
     transactions: db.prepare("SELECT * FROM transactions ORDER BY id ASC").all(),
     suppliers: db.prepare("SELECT * FROM suppliers ORDER BY id ASC").all(),
     order_meta: db.prepare("SELECT * FROM order_meta ORDER BY order_code ASC").all(),
+    order_line_meta: db.prepare("SELECT * FROM order_line_meta ORDER BY order_code ASC, barcode ASC").all(),
     products: db.prepare("SELECT * FROM products ORDER BY id ASC").all(),
     sales: db.prepare("SELECT * FROM sales ORDER BY id ASC").all(),
     product_price_history: db
@@ -393,6 +394,7 @@ function clearAllData() {
     PRAGMA foreign_keys = OFF;
     DELETE FROM sales;
     DELETE FROM product_price_history;
+    DELETE FROM order_line_meta;
     DELETE FROM order_meta;
     DELETE FROM transactions;
     DELETE FROM products;
@@ -410,6 +412,7 @@ function importBackupData(data, { replace = false } = {}) {
   const tx = data.transactions;
   const suppliers = Array.isArray(data.suppliers) ? data.suppliers : [];
   const meta = Array.isArray(data.order_meta) ? data.order_meta : [];
+  const lineMeta = Array.isArray(data.order_line_meta) ? data.order_line_meta : [];
   const products = Array.isArray(data.products) ? data.products : [];
   const sales = Array.isArray(data.sales) ? data.sales : [];
   const priceHistory = Array.isArray(data.product_price_history)
@@ -442,6 +445,16 @@ function importBackupData(data, { replace = false } = {}) {
       has_adjusted_items=excluded.has_adjusted_items,
       adjusted_items_count=excluded.adjusted_items_count,
       updated_at=datetime('now')
+  `);
+
+  const insertLineMeta = db.prepare(`
+    INSERT INTO order_line_meta (order_code, barcode, supplier_id, supplier_cost_lbp, supplier_paid, updated_at)
+    VALUES (@order_code, @barcode, @supplier_id, @supplier_cost_lbp, @supplier_paid, datetime('now'))
+    ON CONFLICT(order_code, barcode) DO UPDATE SET
+      supplier_id = excluded.supplier_id,
+      supplier_cost_lbp = excluded.supplier_cost_lbp,
+      supplier_paid = excluded.supplier_paid,
+      updated_at = datetime('now')
   `);
 
   const insertProduct = db.prepare(`
@@ -552,6 +565,16 @@ function importBackupData(data, { replace = false } = {}) {
       });
     }
 
+    for (const lm of lineMeta) {
+      insertLineMeta.run({
+        order_code: lm.order_code,
+        barcode: lm.barcode,
+        supplier_id: lm.supplier_id ?? null,
+        supplier_cost_lbp: Math.trunc(lm.supplier_cost_lbp || 0),
+        supplier_paid: lm.supplier_paid ? 1 : 0,
+      });
+    }
+
     for (const p of products) {
       insertProduct.run({
         id: p.id,
@@ -621,6 +644,7 @@ function importBackupData(data, { replace = false } = {}) {
     imported_transactions: tx.length,
     imported_suppliers: suppliers.length,
     imported_meta: meta.length,
+    imported_line_meta: lineMeta.length,
     imported_products: products.length,
     imported_sales: sales.length,
     imported_price_history: priceHistory.length,

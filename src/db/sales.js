@@ -512,9 +512,42 @@ function applyOrderSupplierCost(orderCode, supplierCostLbp, usdToLbpRate = 90000
   return { ok: true, affectedRows: rows.length };
 }
 
+function applyLineSupplierCost(orderCode, barcode, supplierCostLbp, usdToLbpRate = 90000) {
+  const db = getDb();
+  const code = String(orderCode || "").trim();
+  const bc = String(barcode || "").trim();
+  if (!code || !bc) return { ok: false, error: "Missing order code or barcode" };
+
+  const row = db
+    .prepare(
+      `
+    SELECT id, total_sale
+    FROM sales
+    WHERE order_code = ? AND barcode = ?
+  `
+    )
+    .get(code, bc);
+
+  if (!row) return { ok: true, affectedRows: 0 };
+
+  const costUsd = Number(supplierCostLbp || 0) / Number(usdToLbpRate || 90000);
+  const profit = Number(row.total_sale || 0) - costUsd;
+
+  db.prepare(
+    `
+    UPDATE sales
+    SET cost = ?, profit = ?
+    WHERE id = ?
+  `
+  ).run(costUsd, profit, row.id);
+
+  return { ok: true, affectedRows: 1 };
+}
+
 module.exports = {
   recordOrderItemsToSales,
   applyOrderSupplierCost,
+  applyLineSupplierCost,
   getSalesReport,
   getRevenueByPeriod,
   getTopProductsByRevenue,

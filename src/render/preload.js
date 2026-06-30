@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld("api", {
 
   // Supplier meta
   ordersUpsertMeta: (payload) => ipcRenderer.invoke("orderMeta:set", payload),
+  ordersGetLineMeta: (orderCode) => ipcRenderer.invoke("orders:getLineMeta", orderCode),
+  ordersUpsertLineMeta: (payload) => ipcRenderer.invoke("orders:lineMeta:set", payload),
   resetSupplierMeta: () => ipcRenderer.invoke("supplier:reset"),
   suppliersGetAll: () => ipcRenderer.invoke("suppliers:getAll"),
   suppliersCreate: (payload) => ipcRenderer.invoke("suppliers:create", payload),

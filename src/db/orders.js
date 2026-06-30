@@ -4,6 +4,15 @@ const { getDb, getDbPath } = require("./database");
 const { getWalletConfig, normalizeType, grossAmountToMerchant } = require("./wallet");
 const { getOrCreateSupplier } = require("./suppliers");
 const { normalizeOrderDetailItems } = require("../services/orderDetailItems");
+const {
+  getOrderLineTotals,
+  getLineMetaForOrder,
+  upsertLineMeta,
+  clearLineMetaForOrder,
+  getItemCountsByOrder,
+  getSalesItemCount,
+  ensureLineMetaFromSales,
+} = require("./orderLineMeta");
 
 function computeOrders() {
   const db = getDb();
@@ -72,6 +81,7 @@ function computeOrders() {
     )
     .all();
   const metaMap = new Map(metas.map((m) => [m.order_code, m]));
+  const multiItemOrders = getItemCountsByOrder();
 
   const orders = [];
   for (const agg of byOrder.values()) {
@@ -85,6 +95,22 @@ function computeOrders() {
       has_adjusted_items: 0,
       adjusted_items_count: 0,
     };
+
+    const itemCount = multiItemOrders.get(agg.order_code) || getSalesItemCount(db, agg.order_code) || 1;
+    if (itemCount > 1) {
+      ensureLineMetaFromSales(agg.order_code);
+    }
+
+    const lineTotals = getOrderLineTotals(agg.order_code);
+    if (lineTotals.has_lines) {
+      meta.supplier_cost = lineTotals.supplier_cost;
+      meta.supplier_paid = lineTotals.supplier_paid;
+      meta.supplier_id = lineTotals.supplier_id;
+      meta.supplier_name = lineTotals.supplier_name;
+      meta.supplier_line_ids = lineTotals.supplier_line_ids;
+      meta.is_multi_supplier = lineTotals.is_multi_supplier;
+      meta.line_meta = lineTotals.lines;
+    }
 
     const incentive = agg.incentive || 0;
     const marketing = agg.marketing || 0;
@@ -126,6 +152,11 @@ function computeOrders() {
       has_missing_types: missingTypes.length > 0 ? 1 : 0,
       has_adjusted_items: meta.has_adjusted_items ? 1 : 0,
       adjusted_items_count: Number(meta.adjusted_items_count || 0),
+      item_count: itemCount,
+      is_splittable: itemCount > 1,
+      is_multi_supplier: !!meta.is_multi_supplier || itemCount > 1,
+      supplier_line_ids: meta.supplier_line_ids || (meta.supplier_id ? [meta.supplier_id] : []),
+      line_meta: meta.line_meta || [],
     });
   }
 
@@ -159,7 +190,13 @@ function filterWalletOrders(orders, opts = {}) {
     const d = orderDateStr(o);
     if (from && d && d < from) return false;
     if (to && d && d > to) return false;
-    if (ids?.length && (!o.supplier_id || !ids.includes(o.supplier_id))) return false;
+    if (ids?.length) {
+      const lineIds = o.supplier_line_ids || [];
+      const matches =
+        (o.supplier_id && ids.includes(o.supplier_id)) ||
+        lineIds.some((id) => ids.includes(id));
+      if (!matches) return false;
+    }
     return true;
   });
 }
@@ -222,6 +259,56 @@ function getSupplierSummary(opts = {}) {
   const bySupplier = new Map();
 
   for (const o of filtered) {
+    if (o.is_multi_supplier && Array.isArray(o.line_meta) && o.line_meta.length > 0) {
+      const db = getDb();
+      const salesRows = db
+        .prepare(
+          `
+        SELECT barcode, total_sale
+        FROM sales
+        WHERE order_code = ?
+      `
+        )
+        .all(o.order_code);
+      const salesByBarcode = new Map(
+        salesRows.map((s) => [s.barcode, Number(s.total_sale || 0)])
+      );
+      const salesTotal =
+        [...salesByBarcode.values()].reduce((sum, v) => sum + v, 0) ||
+        o.line_meta.length;
+
+      for (const line of o.line_meta) {
+        const key = line.supplier_id || 0;
+        const name = line.supplier_name || "(Unassigned)";
+        if (supplierIds?.length && key && !supplierIds.includes(key)) continue;
+        if (supplierIds?.length && !key) continue;
+
+        if (!bySupplier.has(key)) {
+          bySupplier.set(key, {
+            supplier_id: line.supplier_id || null,
+            supplier_name: name,
+            orders: 0,
+            revenue: 0,
+            supplier_cost: 0,
+            payable: 0,
+            profit: 0,
+          });
+        }
+
+        const share =
+          salesTotal > 0
+            ? (salesByBarcode.get(line.barcode) || 0) / salesTotal
+            : 1 / o.line_meta.length;
+        const row = bySupplier.get(key);
+        row.orders += share;
+        row.revenue += Math.round((o.merchant_payout || 0) * share);
+        row.supplier_cost += Number(line.supplier_cost_lbp || 0);
+        if (!line.supplier_paid) row.payable += Number(line.supplier_cost_lbp || 0);
+        row.profit += Math.round((o.merchant_payout || 0) * share) - Number(line.supplier_cost_lbp || 0);
+      }
+      continue;
+    }
+
     const key = o.supplier_id || 0;
     const name = o.supplier_name || "(Unassigned)";
 
@@ -277,7 +364,11 @@ function getTotals(opts = {}) {
 
   for (const o of orders) {
     if (supplierIds && supplierIds.length > 0) {
-      if (!o.supplier_id || !supplierIds.includes(o.supplier_id)) continue;
+      const lineIds = o.supplier_line_ids || [];
+      const matches =
+        (o.supplier_id && supplierIds.includes(o.supplier_id)) ||
+        lineIds.some((id) => supplierIds.includes(id));
+      if (!matches) continue;
     }
 
     totals.orders += 1;
@@ -306,6 +397,16 @@ function upsertOrderMeta({
 }) {
   if (!order_code) return { ok: false, error: "Missing order_code" };
 
+  const db = getDb();
+  const itemCount = getSalesItemCount(db, order_code);
+  if (itemCount > 1) {
+    return {
+      ok: false,
+      error: "This order has multiple items — click Lines and assign supplier + cost per item.",
+    };
+  }
+  clearLineMetaForOrder(order_code);
+
   const cost = Math.trunc(supplier_cost || 0);
   const paid = supplier_paid ? 1 : 0;
 
@@ -324,8 +425,6 @@ function upsertOrderMeta({
   if (requireSupplier && (cost > 0 || paid) && !resolvedSupplierId) {
     return { ok: false, error: "Supplier name is required when setting cost or paid status" };
   }
-
-  const db = getDb();
 
   db.prepare(
     `
@@ -365,6 +464,7 @@ function setOrderAdjustedFlag(orderCode, adjustedCount) {
 
 function resetSupplierMeta() {
   const db = getDb();
+  db.prepare("DELETE FROM order_line_meta").run();
   db.prepare("DELETE FROM order_meta").run();
   return { ok: true };
 }
@@ -546,6 +646,9 @@ function getOrderBillData(orderCode, apiOrderDetail) {
   const supplier_paid = !!(summary?.supplier_paid);
 
   const db = getDb();
+  const lineMetaRows = getLineMetaForOrder(orderCode);
+  const lineMetaByBarcode = new Map(lineMetaRows.map((l) => [l.barcode, l]));
+
   const salesRows = db
     .prepare(
       `
@@ -561,7 +664,10 @@ function getOrderBillData(orderCode, apiOrderDetail) {
 
   let lines = salesRows.map((r) => {
     const qty = Number(r.quantity || 0);
-    const lineCostUsd = Number(r.cost || 0);
+    const lm = lineMetaByBarcode.get(r.barcode);
+    const lineCostUsd = lm
+      ? Number(lm.supplier_cost_lbp || 0) / usdToLbpRate
+      : Number(r.cost || 0);
     return {
       item_name: r.item_name || r.barcode || "Item",
       barcode: r.barcode || "",
@@ -569,6 +675,8 @@ function getOrderBillData(orderCode, apiOrderDetail) {
       quantity: qty,
       unit_cost_usd: qty > 0 ? lineCostUsd / qty : 0,
       line_cost_usd: lineCostUsd,
+      supplier_id: lm?.supplier_id || null,
+      supplier_name: lm?.supplier_name || "",
     };
   });
 
@@ -612,6 +720,8 @@ module.exports = {
   getWalletRevenueByPeriod,
   getTotals,
   upsertOrderMeta,
+  getLineMetaForOrder,
+  upsertLineMeta,
   setOrderAdjustedFlag,
   resetSupplierMeta,
   exportOrdersCsv,

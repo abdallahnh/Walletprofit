@@ -117,6 +117,7 @@ function initDatabase(userDataPath) {
   ensureSalesUniqueness(db);
   ensurePriceHistory(db);
   ensureCompanyExpensesTable(db);
+  ensureOrderLineMetaTable(db);
 
   // Ensure a default wallet config row exists
   const existing = db.prepare("SELECT value FROM config WHERE key=?").get("walletConfig");
@@ -265,6 +266,25 @@ function ensureCompanyExpensesTable(dbConn) {
   dbConn.exec(`
     CREATE INDEX IF NOT EXISTS idx_company_expenses_date
     ON company_expenses(expense_date DESC)
+  `);
+}
+
+function ensureOrderLineMetaTable(dbConn) {
+  dbConn.exec(`
+    CREATE TABLE IF NOT EXISTS order_line_meta (
+      order_code TEXT NOT NULL,
+      barcode TEXT NOT NULL,
+      supplier_id INTEGER REFERENCES suppliers(id),
+      supplier_cost_lbp INTEGER DEFAULT 0,
+      supplier_paid INTEGER DEFAULT 0,
+      updated_at TEXT,
+      PRIMARY KEY (order_code, barcode)
+    )
+  `);
+
+  dbConn.exec(`
+    CREATE INDEX IF NOT EXISTS idx_order_line_meta_supplier
+    ON order_line_meta(supplier_id)
   `);
 }
 

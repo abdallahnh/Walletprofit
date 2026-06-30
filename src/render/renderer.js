@@ -40,6 +40,8 @@ let summarySortDir = "asc";
 let supplierFilter = null;
 let supplierColorById = new Map();
 let selectedOrderCode = null;
+let expandedLineOrders = new Set();
+let lineMetaCache = new Map();
 
 const COLUMN_DEFS = [
   { key: "view", label: "View" },
@@ -435,13 +437,102 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
-function buildSupplierSelectHtml(selectedId) {
+function buildSupplierSelectHtml(selectedId, extraAttrs = "") {
   const options = ['<option value="">— Select —</option>'];
   for (const s of supplierListCache) {
     const sel = Number(selectedId) === Number(s.id) ? " selected" : "";
     options.push(`<option value="${s.id}"${sel}>${escapeHtml(s.name)}</option>`);
   }
   return options.join("");
+}
+
+function renderLineMetaSubRow(orderCode, lines) {
+  const tr = document.createElement("tr");
+  tr.className = "line-sub-row";
+  tr.setAttribute("data-order", orderCode);
+
+  const rowsHtml = (lines || [])
+    .map(
+      (line) => `
+    <tr data-barcode="${escapeHtml(line.barcode)}">
+      <td>${escapeHtml(line.item_name || line.barcode)}</td>
+      <td>${escapeHtml(line.barcode || "")}</td>
+      <td>
+        <select class="inp sel-supplier-line" data-order="${escapeHtml(orderCode)}" data-barcode="${escapeHtml(line.barcode)}" style="min-width:120px;width:100%;">
+          ${buildSupplierSelectHtml(line.supplier_id)}
+        </select>
+      </td>
+      <td class="num">
+        <input class="inp inp-line-cost" type="number" step="${currentCurrency === "USD" ? "0.01" : "1"}" min="0"
+          data-order="${escapeHtml(orderCode)}" data-barcode="${escapeHtml(line.barcode)}"
+          value="${supplierCostLbpToDisplay(line.supplier_cost_lbp)}" />
+      </td>
+      <td style="text-align:center;">
+        <input type="checkbox" class="inp-line-paid" data-order="${escapeHtml(orderCode)}" data-barcode="${escapeHtml(line.barcode)}" ${line.supplier_paid ? "checked" : ""} />
+      </td>
+    </tr>`
+    )
+    .join("");
+
+  tr.innerHTML = `
+    <td colspan="15">
+      <table class="line-meta-inner">
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th>Barcode</th>
+            <th>Supplier</th>
+            <th class="num">Cost</th>
+            <th>Paid</th>
+          </tr>
+        </thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+    </td>`;
+
+  return tr;
+}
+
+async function saveLineMeta(orderCode, barcode) {
+  const tr = tbody.querySelector(`tr.line-sub-row[data-order="${CSS.escape(orderCode)}"]`);
+  if (!tr) return;
+
+  const row = tr.querySelector(`tr[data-barcode="${CSS.escape(barcode)}"]`);
+  if (!row) return;
+
+  const supplierEl = row.querySelector(".sel-supplier-line");
+  const costEl = row.querySelector(".inp-line-cost");
+  const paidEl = row.querySelector(".inp-line-paid");
+
+  const res = await window.api.ordersUpsertLineMeta({
+    order_code: orderCode,
+    barcode,
+    supplier_id: supplierEl?.value ? Number(supplierEl.value) : null,
+    supplier_cost_lbp: supplierCostDisplayToLbp(costEl?.value),
+    supplier_paid: !!paidEl?.checked,
+  });
+
+  if (res?.ok === false) {
+    setError(res.error || "Failed to save line supplier");
+    return;
+  }
+
+  await refreshViewFromCache();
+  expandedLineOrders.add(orderCode);
+  const meta = await window.api.ordersGetLineMeta(orderCode);
+  lineMetaCache.set(orderCode, meta.lines || []);
+  renderRows(currentRowsView);
+}
+
+async function toggleLineExpand(orderCode) {
+  if (expandedLineOrders.has(orderCode)) {
+    expandedLineOrders.delete(orderCode);
+  } else {
+    expandedLineOrders.add(orderCode);
+    const meta = await window.api.ordersGetLineMeta(orderCode);
+    lineMetaCache.set(orderCode, meta.lines || []);
+  }
+  renderRows(currentRowsView);
 }
 
 function getSupplierIdFromRow(orderCode) {
@@ -466,19 +557,32 @@ function renderRows(rows) {
     const negativeProfit = Number(r.net_profit || 0) < 0;
     tr.setAttribute("data-order", r.order_code);
 
+    const isSplit = r.is_splittable || r.is_multi_supplier;
+    const supplierCell = isSplit
+      ? `<div class="split-supplier-cell">
+          <span class="multi-label">${escapeHtml(r.supplier_name || "Split by item")}</span>
+          <button type="button" class="view-btn btn-lines" data-lines-order="${r.order_code}">
+            Lines (${r.item_count || "?"})
+          </button>
+        </div>`
+      : `<select class="sel-supplier" data-order="${r.order_code}" data-kind="supplier">${buildSupplierSelectHtml(r.supplier_id)}</select>`;
+
+    const costCell = isSplit
+      ? `<input class="inp inp-readonly" type="text" readonly value="${supplierCostLbpToDisplay(r.supplier_cost)}" title="Sum of line costs" />`
+      : `<input class="inp" type="number" step="${currentCurrency === "USD" ? "0.01" : "1"}" min="0"
+          data-order="${r.order_code}" data-kind="cost" value="${supplierCostLbpToDisplay(r.supplier_cost)}" />`;
+
+    const paidCell = isSplit
+      ? `<input type="checkbox" data-order="${r.order_code}" data-kind="paid" ${r.supplier_paid ? "checked" : ""} disabled title="Manage paid per line below" />`
+      : `<input type="checkbox" data-order="${r.order_code}" data-kind="paid" ${r.supplier_paid ? "checked" : ""} />`;
+
     tr.innerHTML = `
       <td data-col="view">
   <button class="view-btn" data-code="${r.order_code}">
     View
   </button></td>
       <td data-col="order" class="${negativeProfit ? "order-code-negative" : ""}">${r.order_code}${r.has_adjusted_items ? `<span class="order-adjusted-mark" title="${Number(r.adjusted_items_count || 0)} adjusted item(s)">✦</span>` : ""}</td>
-      <td data-col="supplier">
-        <select
-          class="sel-supplier"
-          data-order="${r.order_code}"
-          data-kind="supplier"
-        >${buildSupplierSelectHtml(r.supplier_id)}</select>
-      </td>
+      <td data-col="supplier">${supplierCell}</td>
       <td class="num" data-col="gross">${fmtNumHideZero(r.gross)}</td>
       <td class="num" data-col="service">${fmtNumHideZero(r.service_fee)}</td>
       <td class="num" data-col="vat">${fmt(r.vat)}</td>
@@ -486,29 +590,54 @@ function renderRows(rows) {
       <td class="num" data-col="marketing">${fmtNumHideZero(r.marketing)}</td>
       <td class="num" data-col="merchant_payout">${fmt(r.merchant_payout)}</td>
       <td class="num" data-col="toters_margin">${fmt(r.toters_margin)}</td>
-      <td class="num" data-col="supplier_cost">
-        <input
-          class="inp"
-          type="number"
-          step="${currentCurrency === "USD" ? "0.01" : "1"}"
-          min="0"
-          data-order="${r.order_code}"
-          data-kind="cost"
-          value="${supplierCostLbpToDisplay(r.supplier_cost)}"
-        />
-      </td>
-      <td data-col="paid">
-        <input type="checkbox" data-order="${r.order_code}" data-kind="paid" ${r.supplier_paid ? "checked" : ""} />
-      </td>
+      <td class="num" data-col="supplier_cost">${costCell}</td>
+      <td data-col="paid">${paidCell}</td>
       <td class="num" data-col="net_profit">${fmt(r.net_profit)}</td>
       <td class="num" data-col="rows">${r.row_count}</td>
       <td data-col="dates">${r.dates || ""}</td>
     `;
 
     tbody.appendChild(tr);
+
+    if (isSplit && expandedLineOrders.has(r.order_code)) {
+      const lines = lineMetaCache.get(r.order_code) || r.line_meta || [];
+      const subTr = renderLineMetaSubRow(r.order_code, lines);
+      tbody.appendChild(subTr);
+    }
   }
 
-  document.querySelectorAll(".view-btn").forEach(btn => {
+  document.querySelectorAll(".btn-lines").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const code = btn.getAttribute("data-lines-order");
+      selectRow(code);
+      await toggleLineExpand(code);
+    });
+  });
+
+  tbody.querySelectorAll(".sel-supplier-line").forEach((sel) => {
+    const orderCode = sel.getAttribute("data-order");
+    const barcode = sel.getAttribute("data-barcode");
+    applySupplierSelectStyle(sel, getSupplierColor(sel.value ? Number(sel.value) : null));
+    sel.addEventListener("change", async () => {
+      applySupplierSelectStyle(sel, getSupplierColor(sel.value ? Number(sel.value) : null));
+      await saveLineMeta(orderCode, barcode);
+    });
+  });
+
+  tbody.querySelectorAll(".inp-line-cost").forEach((inp) => {
+    inp.addEventListener("change", async () => {
+      await saveLineMeta(inp.getAttribute("data-order"), inp.getAttribute("data-barcode"));
+    });
+  });
+
+  tbody.querySelectorAll(".inp-line-paid").forEach((inp) => {
+    inp.addEventListener("change", async () => {
+      await saveLineMeta(inp.getAttribute("data-order"), inp.getAttribute("data-barcode"));
+    });
+  });
+
+  document.querySelectorAll(".view-btn[data-code]").forEach(btn => {
   btn.addEventListener("click", async (e) => {
     e.stopPropagation();
     const code = btn.getAttribute("data-code");
