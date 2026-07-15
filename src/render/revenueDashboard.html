@@ -443,6 +443,14 @@ th {
       }).format(numAmount / usdToLbpRate);
     }
 
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
     function updateSupplierSummary(rows) {
       const tbody = document.getElementById('supplierSummaryBody');
       const tfoot = document.getElementById('supplierSummaryFoot');
@@ -461,7 +469,7 @@ th {
 
       tbody.innerHTML = rows.map(s => `
         <tr>
-          <td>${s.supplier_name}</td>
+          <td>${escapeHtml(s.supplier_name)}</td>
           <td class="num">${formatNumber(s.orders)}</td>
           <td class="num">${formatLbp(s.revenue)}</td>
           <td class="num">${formatLbp(s.supplier_cost)}</td>
@@ -803,8 +811,8 @@ th {
       const tbody = document.getElementById('topRevenueTableBody');
       tbody.innerHTML = products.map(p => `
         <tr>
-          <td>${p.item_name}</td>
-          <td>${p.brand || ''}</td>
+          <td>${escapeHtml(p.item_name)}</td>
+          <td>${escapeHtml(p.brand || '')}</td>
           <td class="num">${formatNumber(p.sold_qty)}</td>
           <td class="num">${formatCurrency(p.revenue)}</td>
           <td class="num">${formatCurrency(p.supplier_cost)}</td>
@@ -818,8 +826,8 @@ th {
       const tbody = document.getElementById('topProfitTableBody');
       tbody.innerHTML = products.map(p => `
         <tr>
-          <td>${p.item_name}</td>
-          <td>${p.brand || ''}</td>
+          <td>${escapeHtml(p.item_name)}</td>
+          <td>${escapeHtml(p.brand || '')}</td>
           <td class="num">${formatNumber(p.sold_qty)}</td>
           <td class="num">${formatCurrency(p.revenue)}</td>
           <td class="num">${formatCurrency(p.supplier_cost)}</td>

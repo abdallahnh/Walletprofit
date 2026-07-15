@@ -6,7 +6,13 @@ function setAuthToken(token) {
 }
 
 function setBaseUrl(url) {
-  baseUrl = (url || "").replace(/\/$/, "") + "/api";
+  const parsed = new URL(String(url || ""));
+  if (!["https:", "http:"].includes(parsed.protocol)) {
+    throw new Error("Base URL must use HTTP or HTTPS");
+  }
+  parsed.hash = "";
+  parsed.search = "";
+  baseUrl = parsed.toString().replace(/\/$/, "") + "/api";
 }
 
 async function httpGet(url) {

@@ -593,7 +593,9 @@ async function toggleItemExpand(orderCode, isSplit) {
 }
 
 function getSupplierIdFromRow(orderCode) {
-  const el = tbody.querySelector(`select[data-kind='supplier'][data-order='${orderCode}']`);
+  const el = tbody.querySelector(
+    `select[data-kind='supplier'][data-order='${CSS.escape(orderCode)}']`
+  );
   if (!el || !el.value) return null;
   return Number(el.value) || null;
 }
@@ -613,37 +615,38 @@ function renderRows(rows) {
     const tr = document.createElement("tr");
     const negativeProfit = Number(r.net_profit || 0) < 0;
     tr.setAttribute("data-order", r.order_code);
+    const safeOrderCode = escapeHtml(r.order_code || "");
 
     const isSplit = r.is_splittable;
     const itemCount = r.item_count || (r.order_items || []).length || 0;
     const itemsBtn =
       itemCount > 0
-        ? `<button type="button" class="view-btn btn-items" data-items-order="${r.order_code}" title="Show items">
+        ? `<button type="button" class="view-btn btn-items" data-items-order="${safeOrderCode}" title="Show items">
             Items (${itemCount})
           </button>`
         : "";
 
     const supplierCell = isSplit
       ? `<span class="multi-label">${escapeHtml(r.supplier_name || "Assign per item")}</span>`
-      : `<select class="sel-supplier" data-order="${r.order_code}" data-kind="supplier">${buildSupplierSelectHtml(r.supplier_id)}</select>`;
+      : `<select class="sel-supplier" data-order="${safeOrderCode}" data-kind="supplier">${buildSupplierSelectHtml(r.supplier_id)}</select>`;
 
     const costCell = isSplit
       ? `<input class="inp inp-readonly" type="text" readonly value="${supplierCostLbpToDisplay(r.supplier_cost)}" title="Sum of line costs" />`
       : `<input class="inp" type="number" step="${currentCurrency === "USD" ? "0.01" : "1"}" min="0"
-          data-order="${r.order_code}" data-kind="cost" value="${supplierCostLbpToDisplay(r.supplier_cost)}" />`;
+          data-order="${safeOrderCode}" data-kind="cost" value="${supplierCostLbpToDisplay(r.supplier_cost)}" />`;
 
     const paidCell = isSplit
-      ? `<input type="checkbox" data-order="${r.order_code}" data-kind="paid" ${r.supplier_paid ? "checked" : ""} disabled title="Manage paid per line below" />`
-      : `<input type="checkbox" data-order="${r.order_code}" data-kind="paid" ${r.supplier_paid ? "checked" : ""} />`;
+      ? `<input type="checkbox" data-order="${safeOrderCode}" data-kind="paid" ${r.supplier_paid ? "checked" : ""} disabled title="Manage paid per line below" />`
+      : `<input type="checkbox" data-order="${safeOrderCode}" data-kind="paid" ${r.supplier_paid ? "checked" : ""} />`;
 
     tr.innerHTML = `
       <td data-col="view">
-  <button class="view-btn" data-code="${r.order_code}">
+  <button class="view-btn" data-code="${safeOrderCode}">
     View
   </button></td>
       <td data-col="order" class="${negativeProfit ? "order-code-negative" : ""}">
         <div class="order-cell-inner">
-          <span>${r.order_code}${r.has_adjusted_items ? `<span class="order-adjusted-mark" title="${Number(r.adjusted_items_count || 0)} adjusted item(s)">✦</span>` : ""}</span>
+          <span>${safeOrderCode}${r.has_adjusted_items ? `<span class="order-adjusted-mark" title="${Number(r.adjusted_items_count || 0)} adjusted item(s)">✦</span>` : ""}</span>
           ${itemsBtn}
         </div>
       </td>
@@ -659,7 +662,7 @@ function renderRows(rows) {
       <td data-col="paid">${paidCell}</td>
       <td class="num" data-col="net_profit">${fmt(r.net_profit)}</td>
       <td class="num" data-col="rows">${r.row_count}</td>
-      <td data-col="dates">${r.dates || ""}</td>
+      <td data-col="dates">${escapeHtml(r.dates || "")}</td>
     `;
 
     tbody.appendChild(tr);

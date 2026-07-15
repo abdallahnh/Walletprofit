@@ -88,7 +88,34 @@ function resolveRendererPaths() {
     appPath,
     indexHtml: path.join(appPath, "src", "render", "index.html"),
     preloadJs: path.join(appPath, "src", "render", "preload.js"),
+    orderDetailsPreloadJs: path.join(appPath, "src", "render", "orderDetailsPreload.js"),
   };
+}
+
+function lockDownWindow(win) {
+  const openExternal = (url) => {
+    try {
+      const protocol = new URL(url).protocol;
+      if (["https:", "http:", "mailto:", "tel:"].includes(protocol)) {
+        void shell.openExternal(url);
+      }
+    } catch {
+      // Ignore malformed renderer-provided links.
+    }
+  };
+
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    openExternal(url);
+    return { action: "deny" };
+  });
+  win.webContents.on("will-navigate", (event, url) => {
+    const protocol = (() => {
+      try { return new URL(url).protocol; } catch { return ""; }
+    })();
+    if (protocol === "file:") return;
+    event.preventDefault();
+    openExternal(url);
+  });
 }
 
 function createWindow() {
@@ -103,6 +130,7 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
+  lockDownWindow(win);
 
   buildAppMenu(win);
 
@@ -297,6 +325,7 @@ ipcMain.handle("open-suppliers", () => {
       nodeIntegration: false,
     },
   });
+  lockDownWindow(win);
 
   win.loadFile(suppliersPath);
 });
@@ -326,6 +355,7 @@ ipcMain.handle("open-settlements", () => {
       nodeIntegration: false,
     },
   });
+  lockDownWindow(win);
 
   win.loadFile(settlementsPath);
 });
@@ -343,6 +373,7 @@ ipcMain.handle("open-transactions", () => {
       nodeIntegration: false,
     },
   });
+  lockDownWindow(win);
 
   win.loadFile(transactionsPath);
 });
@@ -384,6 +415,7 @@ ipcMain.handle("open-company-expenses", () => {
       nodeIntegration: false,
     },
   });
+  lockDownWindow(win);
 
   win.loadFile(pagePath);
 });
@@ -454,15 +486,18 @@ ipcMain.handle("open-order", async (_, orderCode) => {
   const billData = ordersDb.getOrderBillData(orderCode, order.order_detail);
 
   const orderPath = path.join(app.getAppPath(), "src", "render", "orderDetails.html");
+  const { orderDetailsPreloadJs } = resolveRendererPaths();
 
   const win = new BrowserWindow({
     width: 900,
     height: 700,
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
+      preload: orderDetailsPreloadJs,
+      nodeIntegration: false,
+      contextIsolation: true,
     }
   });
+  lockDownWindow(win);
 
   win.loadFile(orderPath);
 
@@ -554,6 +589,7 @@ ipcMain.handle("open-products", () => {
       nodeIntegration: false
     }
   });
+  lockDownWindow(win);
 
   console.log("Opening products page:", productsPath);
 
@@ -581,6 +617,7 @@ ipcMain.handle("open-import", () => {
       nodeIntegration: false
     }
   });
+  lockDownWindow(win);
 
   console.log("Opening import page:", importPath);
 
@@ -608,6 +645,7 @@ ipcMain.handle("open-revenue-dashboard", () => {
       nodeIntegration: false
     }
   });
+  lockDownWindow(win);
 
   console.log("Opening revenue dashboard:", dashboardPath);
 
@@ -634,6 +672,7 @@ ipcMain.handle("open-db-admin", () => {
       nodeIntegration: false,
     },
   });
+  lockDownWindow(win);
 
   console.log("Opening DB admin page:", adminPath);
 

@@ -220,17 +220,18 @@ function renderProducts(){
 
   filteredProducts.forEach(p => {
     const tr = document.createElement("tr");
-    tr.dataset.barcode = p.barcode;
+    const barcode = String(p.barcode || "");
+    tr.dataset.barcode = barcode;
 
     const isEditing = tr.classList.contains('edit-mode');
 
     tr.innerHTML = `
-      <td>${p.barcode}</td>
-      <td>${p.item_name}</td>
-      <td>${p.category || ""}</td>
-      <td title="${p.image_url || ""}">
-        ${p.image_url
-          ? `<a href="${p.image_url}" target="_blank" rel="noopener noreferrer">Open image</a>`
+      <td>${escapeHtml(barcode)}</td>
+      <td>${escapeHtml(p.item_name || "")}</td>
+      <td>${escapeHtml(p.category || "")}</td>
+      <td title="${escapeHtml(p.image_url || "")}">
+        ${safeHttpUrl(p.image_url)
+          ? `<a href="${escapeHtml(safeHttpUrl(p.image_url))}" target="_blank" rel="noopener noreferrer">Open image</a>`
           : ""}
       </td>
       <td class="num input-cell">
@@ -249,16 +250,34 @@ function renderProducts(){
                data-original="${p.stock_quantity != null ? p.stock_quantity : 0}">
       </td>
       <td>
-        <button class="save-btn" onclick="saveProduct('${p.barcode}')">Save</button>
+        <button class="save-btn" type="button">Save</button>
       </td>
     `;
 
     tbody.appendChild(tr);
+    tr.querySelector(".save-btn").addEventListener("click", () => saveProduct(barcode));
   });
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function safeHttpUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    return ["http:", "https:"].includes(url.protocol) ? url.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
 async function saveProduct(barcode) {
-  const tr = document.querySelector(`tr[data-barcode="${barcode}"]`);
+  const tr = document.querySelector(`tr[data-barcode="${CSS.escape(barcode)}"]`);
   if (!tr) return;
 
   const priceInput = tr.querySelector('.price-input');
@@ -320,7 +339,11 @@ async function saveProduct(barcode) {
 
 function showMessage(text, type) {
   const messages = document.getElementById('messages');
-  messages.innerHTML = `<div class="${type}-msg">${text}</div>`;
+  messages.replaceChildren();
+  const message = document.createElement("div");
+  message.className = type === "success" ? "success-msg" : "error-msg";
+  message.textContent = String(text || "");
+  messages.appendChild(message);
 
   // Auto-clear success messages after 3 seconds
   if (type === 'success') {

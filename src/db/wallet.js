@@ -5,6 +5,16 @@ const { getDb, getDbPath, replaceDatabaseFromFile } = require("./database");
 
 const BACKUP_SCHEMA_VERSION = 4;
 
+function normalizeHttpBaseUrl(value) {
+  const url = new URL(String(value || "https://dashboard.toters-api.com").trim());
+  if (!["https:", "http:"].includes(url.protocol)) {
+    throw new Error("Base URL must use HTTP or HTTPS");
+  }
+  url.hash = "";
+  url.search = "";
+  return url.toString().replace(/\/$/, "");
+}
+
 function extractOrderCode(reason) {
   if (!reason) return null;
   const m = String(reason).match(/order\s+(\d{3,}-\d{3,})/i);
@@ -154,8 +164,15 @@ function getWalletConfig() {
 
 function saveWalletConfig(cfg) {
   const db = getDb();
+  cfg = cfg && typeof cfg === "object" ? cfg : {};
+  let baseUrl;
+  try {
+    baseUrl = normalizeHttpBaseUrl(cfg.baseUrl);
+  } catch (e) {
+    return { ok: false, error: String(e.message || e) };
+  }
   const safe = {
-    baseUrl: String(cfg.baseUrl || "https://dashboard.toters-api.com").trim(),
+    baseUrl,
     storeId: String(cfg.storeId || "").trim(),
     wallet: String(cfg.wallet || "main").trim() || "main",
     token: String(cfg.token || "").trim(),
@@ -177,7 +194,14 @@ async function syncWallet() {
     return { ok: false, error: "Missing config: baseUrl/storeId/token (open Wallet Settings)" };
   }
 
-  let nextUrl = `${cfg.baseUrl}/api/stores/${cfg.storeId}/wallet/all?page=1&wallet=${encodeURIComponent(
+  let trustedBaseUrl;
+  try {
+    trustedBaseUrl = normalizeHttpBaseUrl(cfg.baseUrl);
+  } catch (e) {
+    return { ok: false, error: String(e.message || e) };
+  }
+  const trustedOrigin = new URL(trustedBaseUrl).origin;
+  let nextUrl = `${trustedBaseUrl}/api/stores/${encodeURIComponent(cfg.storeId)}/wallet/all?page=1&wallet=${encodeURIComponent(
     cfg.wallet || "main"
   )}`;
   let totalFetched = 0;
@@ -238,7 +262,10 @@ async function syncWallet() {
     totalIgnored += res.ignored;
 
     if (wallet?.next_page_url) {
-      const u = new URL(wallet.next_page_url);
+      const u = new URL(wallet.next_page_url, trustedBaseUrl);
+      if (u.origin !== trustedOrigin) {
+        return { ok: false, error: "Rejected wallet pagination URL from an untrusted origin" };
+      }
       u.searchParams.set("wallet", cfg.wallet || "main");
       nextUrl = u.toString();
     } else {
@@ -275,7 +302,12 @@ async function fetchRemainingBalanceFromToters() {
     return { ok: false, error: "Missing config: baseUrl/storeId/token (open Wallet Settings)" };
   }
 
-  const base = String(cfg.baseUrl).replace(/\/$/, "");
+  let base;
+  try {
+    base = normalizeHttpBaseUrl(cfg.baseUrl);
+  } catch (e) {
+    return { ok: false, error: String(e.message || e) };
+  }
   const url = `${base}/api/retailer/stores-wallets-summary`;
   const storeId = String(cfg.storeId);
   const walletName = cfg.wallet || "main";

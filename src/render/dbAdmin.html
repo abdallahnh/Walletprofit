@@ -152,7 +152,7 @@
       columnsPanel.innerHTML = tableColumns
         .map((col) => {
           const checked = visibleColumns.includes(col) ? "checked" : "";
-          return `<label><input type="checkbox" data-col-check="${col}" ${checked} /> ${col}</label>`;
+          return `<label><input type="checkbox" data-col-check="${escapeHtml(col)}" ${checked} /> ${escapeHtml(col)}</label>`;
         })
         .join("");
 
@@ -257,9 +257,9 @@
         return;
       }
 
-      thead.innerHTML = "<tr>" + visibleColumns.map(c => "<th>" + c + "</th>").join("") + "</tr>";
+      thead.innerHTML = "<tr>" + visibleColumns.map(c => "<th>" + escapeHtml(c) + "</th>").join("") + "</tr>";
       tbody.innerHTML = visibleRows.map(r => {
-        return "<tr>" + visibleColumns.map(c => "<td>" + String(r[c] ?? "") + "</td>").join("") + "</tr>";
+        return "<tr>" + visibleColumns.map(c => "<td>" + escapeHtml(r[c]) + "</td>").join("") + "</tr>";
       }).join("");
 
       const suffix = query ? ` | Filtered: ${visibleRows.length}` : "";

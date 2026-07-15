@@ -1,6 +1,3 @@
-const { ipcRenderer } = require("electron");
-const billExport = require("../db/billExport");
-
 let currentBillData = null;
 
 function escapeHtml(str) {
@@ -12,7 +9,39 @@ function escapeHtml(str) {
 }
 
 function formatAmount(amount, currency) {
-  return billExport.formatDisplayAmount(amount, currency);
+  const n = Number(amount) || 0;
+  if (currency === "LBP") return n.toLocaleString() + " L.L";
+  return "$" + n.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function safeHttpUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    return ["http:", "https:"].includes(url.protocol) ? url.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
+function buildBillPlainText(billData) {
+  const currency = billData.display_currency || "USD";
+  const lines = [
+    "SUPPLIER PAYMENT BILL", "",
+    `Supplier: ${billData.supplier_name || ""}`,
+    `Phone: ${billData.supplier_phone || "-"}`,
+    `Order: ${billData.order_code || ""}`,
+    `Date: ${billData.order_date || "-"}`,
+    `Status: ${billData.supplier_paid ? "PAID" : "UNPAID"}`, "", "Items:",
+  ];
+  for (const line of billData.lines || []) {
+    lines.push(`- ${line.item_name} | Qty: ${line.quantity} | ${formatAmount(line.line_cost_display, currency)}`);
+  }
+  lines.push("", `TOTAL DUE: ${formatAmount(billData.total_cost_display, currency)}`, "");
+  lines.push("Please verify quantities and amounts before payment.");
+  return lines.join("\n");
 }
 
 function getBillCurrency() {
@@ -153,7 +182,8 @@ function formatPhoneLine(label, phone, countryCode) {
   if (!phone) return `<div><b>${label}:</b> -</div>`;
   const cc = countryCode ? `+${countryCode.replace(/\D/g, "")} ` : "";
   const display = `${cc}${phone}`;
-  return `<div><b>${label}:</b> <a href="tel:${display.replace(/\s/g, "")}">${escapeHtml(display)}</a></div>`;
+  const dialable = display.replace(/[^\d+]/g, "");
+  return `<div><b>${label}:</b> <a href="tel:${dialable}">${escapeHtml(display)}</a></div>`;
 }
 
 function renderBill(billData, opts = {}) {
@@ -277,7 +307,7 @@ document.getElementById("btnPrintBill").addEventListener("click", () => {
 document.getElementById("btnCopyBill").addEventListener("click", async () => {
   const data = getBillDataForAction();
   if (!data) return;
-  const text = billExport.buildBillPlainText(data);
+  const text = buildBillPlainText(data);
   try {
     await navigator.clipboard.writeText(text);
     alert("Bill copied to clipboard. Paste it in WhatsApp.");
@@ -289,7 +319,7 @@ document.getElementById("btnCopyBill").addEventListener("click", async () => {
 document.getElementById("btnWhatsAppBill").addEventListener("click", async () => {
   const data = getBillDataForAction();
   if (!data) return;
-  const res = await ipcRenderer.invoke("bill:openWhatsApp", data);
+  const res = await window.orderApi.openWhatsAppBill(data);
   if (!res?.ok) {
     alert(res?.error || "Could not open WhatsApp");
   }
@@ -298,7 +328,7 @@ document.getElementById("btnWhatsAppBill").addEventListener("click", async () =>
 document.getElementById("btnExportExcel").addEventListener("click", async () => {
   const data = getBillDataForAction();
   if (!data) return;
-  const res = await ipcRenderer.invoke("bill:exportExcel", data);
+  const res = await window.orderApi.exportBillExcel(data);
   if (res?.canceled) return;
   if (!res?.ok) {
     alert(res?.error || "Export failed");
@@ -310,7 +340,7 @@ document.getElementById("btnExportExcel").addEventListener("click", async () => 
 document.getElementById("btnExportWord").addEventListener("click", async () => {
   const data = getBillDataForAction();
   if (!data) return;
-  const res = await ipcRenderer.invoke("bill:exportWord", data);
+  const res = await window.orderApi.exportBillWord(data);
   if (res?.canceled) return;
   if (!res?.ok) {
     alert(res?.error || "Export failed");
@@ -319,7 +349,7 @@ document.getElementById("btnExportWord").addEventListener("click", async () => {
   alert(`Bill saved to:\n${res.path}\n\nOpen in Microsoft Word to print.`);
 });
 
-ipcRenderer.on("order-data", (_, payload) => {
+window.orderApi.onOrderData((payload) => {
   const order = payload?.order || payload;
   currentBillData = payload?.billData || null;
 
@@ -359,7 +389,11 @@ ipcRenderer.on("order-data", (_, payload) => {
 
   document.getElementById("address").textContent = addrText || "-";
 
-  const mapsLink = a.lat && a.lon ? `https://www.google.com/maps?q=${a.lat},${a.lon}` : null;
+  const lat = Number(a.lat);
+  const lon = Number(a.lon);
+  const mapsLink = Number.isFinite(lat) && Number.isFinite(lon)
+    ? `https://www.google.com/maps?q=${encodeURIComponent(`${lat},${lon}`)}`
+    : null;
   document.getElementById("maps").innerHTML = mapsLink
     ? `<a href="${mapsLink}">Open in Maps</a>`
     : "";
@@ -374,10 +408,10 @@ ipcRenderer.on("order-data", (_, payload) => {
   document.getElementById("orderSummary").innerHTML = `
     <div><b>Total:</b> ${Number(order.final_total || order.total || 0).toLocaleString()}</div>
     <div><b>Items Total:</b> ${Number(order.final_cost || order.items_total || 0).toLocaleString()}</div>
-    <div><b>Delivery:</b> ${order.delivery_charge ?? "-"}</div>
-    <div><b>Tip:</b> ${order.tip}</div>
-    <div><b>Payment:</b> ${order.payment_type}</div>
-    <div><b>Created:</b> ${order.created_at}</div>
+    <div><b>Delivery:</b> ${escapeHtml(order.delivery_charge ?? "-")}</div>
+    <div><b>Tip:</b> ${escapeHtml(order.tip ?? "-")}</div>
+    <div><b>Payment:</b> ${escapeHtml(order.payment_type ?? "-")}</div>
+    <div><b>Created:</b> ${escapeHtml(order.created_at ?? "-")}</div>
     ${supplierLine}
   `;
 
@@ -400,12 +434,16 @@ ipcRenderer.on("order-data", (_, payload) => {
     const div = document.createElement("div");
     div.className = detail.was_adjusted ? "item-card adjusted" : "item-card";
 
-    const image =
-      item.image || (item.imgs && item.imgs[0]) || "https://via.placeholder.com/150";
+    const image = safeHttpUrl(
+      item.image || (item.imgs && item.imgs[0]) || "https://via.placeholder.com/150"
+    );
+
+    const orderedQuantity = Number(detail.ordered_quantity || 0);
+    const quantity = Number(detail.quantity || 0);
 
     const qtyLine = detail.was_adjusted
-      ? `<div class="label">Qty: <s>${detail.ordered_quantity}</s> → <b>${detail.quantity}</b></div>`
-      : `<div class="label">Qty: ${detail.quantity}</div>`;
+      ? `<div class="label">Qty: <s>${orderedQuantity}</s> → <b>${quantity}</b></div>`
+      : `<div class="label">Qty: ${quantity}</div>`;
 
     const totalLine = detail.was_adjusted
       ? `<div class="label">Total: <s>${detail.ordered_total?.toLocaleString()}</s> → <b>${Number(detail.total || 0).toLocaleString()}</b></div>`
@@ -417,7 +455,7 @@ ipcRenderer.on("order-data", (_, payload) => {
 
     div.innerHTML = `
       ${badge}
-      <img src="${escapeHtml(image)}" alt="" />
+      ${image ? `<img src="${escapeHtml(image)}" alt="" />` : ""}
       <div class="value">${escapeHtml(item.ref || detail.item_ref || "-")}</div>
       <div class="label">Barcode: ${escapeHtml(item.barcode || "-")}</div>
       ${qtyLine}
