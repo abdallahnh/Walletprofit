@@ -9,6 +9,7 @@ const walletDb = require("../src/db/wallet");
 const productsDb = require("../src/db/products");
 const salesDb = require("../src/db/sales");
 const suppliersDb = require("../src/db/suppliers");
+const ordersDb = require("../src/db/orders");
 const orderSyncState = require("../src/db/orderSyncState");
 const walletSyncState = require("../src/db/walletSyncState");
 const { runCheckpointedOrderSync } = require("../src/services/salesOrderSync");
@@ -223,6 +224,7 @@ test("order sync resumes the failed page without repeating completed orders", as
   assert.equal(third.ok, true);
   assert.equal(third.stoppedAtWatermark, true);
   assert.equal(third.processed, 0);
+  assert.equal(third.checkpoint.last_completed_page, 2);
   assert.deepEqual(loadedCodes, ["A", "B", "B", "C"]);
   assert.deepEqual(fetchedPages, [1, 1, 2, 1]);
 
@@ -232,6 +234,7 @@ test("order sync resumes the failed page without repeating completed orders", as
   assert.equal(fourth.stoppedAtWatermark, true);
   assert.equal(fourth.processed, 1);
   assert.equal(fourth.checkpoint.last_synced_head_code, "D");
+  assert.equal(fourth.checkpoint.last_completed_page, 2);
   assert.deepEqual(loadedCodes, ["A", "B", "B", "C", "D"]);
 });
 
@@ -306,6 +309,7 @@ test("wallet sync resumes a failed page and then stops at its transaction waterm
     assert.equal(third.ok, true);
     assert.equal(third.stoppedAtWatermark, true);
     assert.equal(third.totalConsidered, 0);
+    assert.equal(third.checkpoint.last_completed_page, 2);
 
     pageOneItems = [
       { id: 4, store_id: 42, amount: 400, wallet: "main", reason: "New arrival" },
@@ -316,6 +320,7 @@ test("wallet sync resumes a failed page and then stops at its transaction waterm
     assert.equal(fourth.stoppedAtWatermark, true);
     assert.equal(fourth.totalInserted, 1);
     assert.equal(fourth.checkpoint.last_synced_head_id, "4");
+    assert.equal(fourth.checkpoint.last_completed_page, 2);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM transactions").get().count, 4);
     assert.deepEqual(fetchedPages, [1, 2, 2, 1, 1]);
   } finally {
@@ -337,4 +342,143 @@ test("resetting wallet sync clears only its checkpoint", () => {
   assert.equal(reset.next_page, 1);
   assert.equal(reset.last_synced_head_id, null);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM transactions").get().count, 1);
+});
+
+test("completed v1 sync checkpoints rebuild once to restore historical page depth", () => {
+  const { db } = createDatabase();
+  db.prepare("INSERT INTO config (key, value) VALUES (?, ?)").run(
+    "ordersSyncCheckpoint:legacy-store",
+    JSON.stringify({
+      version: 1,
+      store_id: "legacy-store",
+      status: "completed",
+      next_page: 1,
+      last_completed_page: 1,
+      last_synced_head_code: "ORDER-1",
+    })
+  );
+  db.prepare("INSERT INTO config (key, value) VALUES (?, ?)").run(
+    "walletSyncCheckpoint:legacy-store:main",
+    JSON.stringify({
+      version: 1,
+      store_id: "legacy-store",
+      wallet: "main",
+      status: "completed",
+      next_page: 1,
+      last_completed_page: 1,
+      last_synced_head_id: "100",
+    })
+  );
+
+  const orderState = orderSyncState.get("legacy-store");
+  const walletState = walletSyncState.get("legacy-store", "main");
+  assert.equal(orderState.version, 2);
+  assert.equal(orderState.status, "idle");
+  assert.equal(orderState.last_synced_head_code, null);
+  assert.equal(walletState.version, 2);
+  assert.equal(walletState.status, "idle");
+  assert.equal(walletState.last_synced_head_id, null);
+});
+
+test("multi-supplier orders create one bill per supplier", () => {
+  const { db } = createDatabase();
+  const productFixture = (overrides) => ({
+    barcode: "",
+    item_name: "",
+    sku: "",
+    brand: "",
+    store_name: "",
+    item_id: "",
+    source_id: "",
+    category: "",
+    category_id: "",
+    sub_category: "",
+    sub_category_id: "",
+    unit_price_usd: 0,
+    cost_usd: 0,
+    measurement_unit: "",
+    measurement_value: "",
+    description: "",
+    image_url: "",
+    alt_barcodes: "",
+    import_price_usd: 0,
+    stock_quantity: 0,
+    ...overrides,
+  });
+  productsDb.importProducts([
+    productFixture({
+      barcode: "ITEM-A",
+      item_name: "Item A",
+      unit_price_usd: 10,
+      cost_usd: 4,
+      stock_quantity: 10,
+    }),
+    productFixture({
+      barcode: "ITEM-B",
+      item_name: "Item B",
+      unit_price_usd: 20,
+      cost_usd: 7,
+      stock_quantity: 10,
+    }),
+  ]);
+  const products = db.prepare(
+    "SELECT id, barcode FROM products WHERE barcode IN ('ITEM-A', 'ITEM-B')"
+  ).all();
+  const productId = new Map(products.map((product) => [product.barcode, product.id]));
+  const supplierA = suppliersDb.createSupplier({ name: "Supplier A", phone: "111" }).supplier;
+  const supplierB = suppliersDb.createSupplier({ name: "Supplier B", phone: "222" }).supplier;
+
+  db.prepare(
+    "INSERT INTO transactions (id, amount, reason, type, order_code, created_at) " +
+    "VALUES (1, 2700000, 'Order 500-600', 'order', '500-600', '2026-07-15T10:00:00Z')"
+  ).run();
+  const insertSale = db.prepare(
+    "INSERT INTO sales " +
+    "(order_code, barcode, product_id, quantity, unit_price, cost, total_sale, profit) " +
+    "VALUES (?, ?, ?, 1, ?, ?, ?, ?)"
+  );
+  insertSale.run("500-600", "ITEM-A", productId.get("ITEM-A"), 10, 4, 10, 6);
+  insertSale.run("500-600", "ITEM-B", productId.get("ITEM-B"), 20, 7, 20, 13);
+  ordersDb.upsertLineMeta({
+    order_code: "500-600",
+    barcode: "ITEM-A",
+    supplier_id: supplierA.id,
+    supplier_cost_lbp: 360000,
+    supplier_paid: true,
+  });
+  ordersDb.upsertLineMeta({
+    order_code: "500-600",
+    barcode: "ITEM-B",
+    supplier_id: supplierB.id,
+    supplier_cost_lbp: 630000,
+    supplier_paid: false,
+  });
+
+  const bills = ordersDb.getOrderBillDataList("500-600");
+  assert.equal(bills.length, 2);
+  assert.deepEqual(
+    bills.map((bill) => ({
+      supplier: bill.supplier_name,
+      phone: bill.supplier_phone,
+      paid: bill.supplier_paid,
+      barcodes: bill.lines.map((line) => line.barcode),
+      total_lbp: bill.supplier_cost_lbp,
+    })),
+    [
+      {
+        supplier: "Supplier A",
+        phone: "111",
+        paid: true,
+        barcodes: ["ITEM-A"],
+        total_lbp: 360000,
+      },
+      {
+        supplier: "Supplier B",
+        phone: "222",
+        paid: false,
+        barcodes: ["ITEM-B"],
+        total_lbp: 630000,
+      },
+    ]
+  );
 });

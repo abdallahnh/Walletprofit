@@ -10,7 +10,7 @@ function keyForStore(storeId) {
 
 function defaultState(storeId) {
   return {
-    version: 1,
+    version: 2,
     store_id: String(storeId),
     status: "idle",
     next_page: 1,
@@ -29,14 +29,22 @@ function defaultState(storeId) {
 function normalizeState(storeId, value) {
   const fallback = defaultState(storeId);
   if (!value || typeof value !== "object") return fallback;
+  const rebuildCompletedV1 = Number(value.version || 1) < 2 && value.status === "completed";
   return {
     ...fallback,
     ...value,
+    version: 2,
     store_id: String(storeId),
-    next_page: Math.max(1, Math.trunc(Number(value.next_page) || 1)),
-    completed_order_codes: Array.isArray(value.completed_order_codes)
+    status: rebuildCompletedV1 ? "idle" : value.status,
+    next_page: rebuildCompletedV1
+      ? 1
+      : Math.max(1, Math.trunc(Number(value.next_page) || 1)),
+    completed_order_codes: !rebuildCompletedV1 && Array.isArray(value.completed_order_codes)
       ? Array.from(new Set(value.completed_order_codes.map(String)))
       : [],
+    last_completed_page: rebuildCompletedV1 ? null : value.last_completed_page,
+    last_synced_head_code: rebuildCompletedV1 ? null : value.last_synced_head_code,
+    cycle_head_code: rebuildCompletedV1 ? null : value.cycle_head_code,
   };
 }
 
@@ -122,6 +130,7 @@ function markFailed(storeId, error, orderCode = null) {
 function markCompleted(storeId, lastPage) {
   const current = get(storeId);
   const now = new Date().toISOString();
+  const completedPage = Math.max(1, Math.trunc(Number(lastPage) || 1));
   return save(storeId, {
     ...current,
     status: "completed",
@@ -130,7 +139,9 @@ function markCompleted(storeId, lastPage) {
     last_error: null,
     failed_order_code: null,
     last_completed_at: now,
-    last_completed_page: Math.max(1, Math.trunc(Number(lastPage) || 1)),
+    // Incremental cycles often stop on page 1 at the saved watermark. Keep the
+    // deepest historical page instead of replacing it with this run's last page.
+    last_completed_page: Math.max(Number(current.last_completed_page) || 0, completedPage),
     last_synced_head_code: current.cycle_head_code || current.last_synced_head_code,
     cycle_head_code: null,
   });

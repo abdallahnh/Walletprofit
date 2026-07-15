@@ -45,6 +45,19 @@ let selectedOrderCode = null;
 let expandedItemOrders = new Set();
 let lineMetaCache = new Map();
 
+document.querySelectorAll(".menu-dropdown .menu-popover button").forEach((button) => {
+  button.addEventListener("click", () => {
+    button.closest(".menu-dropdown")?.removeAttribute("open");
+  });
+});
+
+document.addEventListener("click", (event) => {
+  if (event.target.closest(".menu-dropdown")) return;
+  document.querySelectorAll(".menu-dropdown[open]").forEach((menu) => {
+    menu.removeAttribute("open");
+  });
+});
+
 const COLUMN_DEFS = [
   { key: "view", label: "View" },
   { key: "order", label: "Order" },
@@ -967,12 +980,19 @@ function renderWalletSyncStatus(checkpoint) {
       ? new Date(checkpoint.last_completed_at).toLocaleString()
       : "recently";
     walletSyncStatusEl.textContent =
-      "Complete through page " + (checkpoint.last_completed_page || 1) + " (" + when + ")";
+      "Up to date · history through page " +
+      (checkpoint.last_completed_page || 1) + " (" + when + ")";
     return;
   }
   walletSyncStatusEl.textContent =
     (checkpoint.status === "failed" ? "Paused" : "Resume") +
     ": page " + checkpoint.next_page;
+}
+
+function formatPageRange(startPage, endPage) {
+  const start = Math.max(1, Number(startPage) || 1);
+  const end = Math.max(start, Number(endPage) || start);
+  return start === end ? String(start) : `${start}–${end}`;
 }
 
 async function updateWalletSyncStatus() {
@@ -998,15 +1018,16 @@ $("btnWalletSync").addEventListener("click", async () => {
       return;
     }
     await refresh();
+    const walletLastPage = (res.startPage || 1) + Math.max(0, (res.pages || 1) - 1);
     alert(
       "Wallet synced.\n" +
-      "Pages: " + (res.startPage || 1) + "–" +
-        ((res.startPage || 1) + Math.max(0, (res.pages || 1) - 1)) + "\n" +
+      "Pages checked this run: " + formatPageRange(res.startPage, walletLastPage) + "\n" +
+      "History covered through page: " + (res.checkpoint?.last_completed_page || 1) + "\n" +
       "Fetched: " + (res.totalFetched || 0) + "\n" +
       "New transactions considered: " + (res.totalConsidered || 0) + "\n" +
       "Inserted: " + (res.totalInserted || 0) + "\n" +
       "Duplicates ignored: " + (res.totalIgnored || 0) + "\n" +
-      "Stopped at previous sync point: " + (res.stoppedAtWatermark ? "Yes" : "No")
+      "Reached previous sync point: " + (res.stoppedAtWatermark ? "Yes" : "No")
     );
   } catch (e) {
     setError(e);
@@ -1175,7 +1196,8 @@ function renderOrderSyncStatus(checkpoint) {
     const when = checkpoint.last_completed_at
       ? new Date(checkpoint.last_completed_at).toLocaleString()
       : "recently";
-    orderSyncStatusEl.textContent = `Complete through page ${checkpoint.last_completed_page || 1} (${when})`;
+    orderSyncStatusEl.textContent =
+      `Up to date · history through page ${checkpoint.last_completed_page || 1} (${when})`;
     return;
   }
   const order = checkpoint.failed_order_code ? `, order ${checkpoint.failed_order_code}` : "";
@@ -1210,10 +1232,11 @@ $("btnSyncSales").addEventListener("click", async () => {
     }
     alert(
       `Synced sales from orders.\n` +
-      `Pages: ${res.startPage || 1}–${res.lastPage || 1}\n` +
+      `Pages checked this run: ${formatPageRange(res.startPage, res.lastPage)}\n` +
+      `History covered through page: ${res.checkpoint?.last_completed_page || 1}\n` +
       `Fetched: ${res.fetched || 0}\n` +
       `Skipped from checkpoint: ${res.skippedAlreadyCompleted || 0}\n` +
-      `Stopped at previous sync point: ${res.stoppedAtWatermark ? "Yes" : "No"}\n` +
+      `Reached previous sync point: ${res.stoppedAtWatermark ? "Yes" : "No"}\n` +
       `Skipped invalid summaries: ${res.skippedInvalidSummaries || 0}\n` +
       `Processed: ${res.processed || 0}\n` +
       `Details loaded: ${res.detailsLoaded || 0}\n` +

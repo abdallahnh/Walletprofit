@@ -640,7 +640,7 @@ function usdToDisplay(usd, displayCurrency, usdToLbpRate) {
   return Math.round(Number(usd || 0) * 100) / 100;
 }
 
-function getOrderBillData(orderCode, apiOrderDetail) {
+function getOrderBillDataList(orderCode, apiOrderDetail) {
   const cfg = getWalletConfig() || {};
   const usdToLbpRate = Number(cfg.usdToLbpRate || 90000);
   const displayCurrency = String(cfg.displayCurrency || "USD").toUpperCase();
@@ -685,17 +685,29 @@ function getOrderBillData(orderCode, apiOrderDetail) {
       line_cost_usd: lineCostUsd,
       supplier_id: lm?.supplier_id || null,
       supplier_name: lm?.supplier_name || "",
+      supplier_phone: lm?.supplier_phone || "",
+      supplier_paid: lm ? !!lm.supplier_paid : false,
     };
   });
 
   if (!lines.length && apiOrderDetail?.length) {
-    lines = enrichBillLinesFromApiOrder(apiOrderDetail, supplier_cost_lbp, usdToLbpRate);
+    lines = enrichBillLinesFromApiOrder(apiOrderDetail, supplier_cost_lbp, usdToLbpRate)
+      .map((line) => {
+        const lm = lineMetaByBarcode.get(line.barcode);
+        const lineCostUsd = lm
+          ? Number(lm.supplier_cost_lbp || 0) / usdToLbpRate
+          : line.line_cost_usd;
+        return {
+          ...line,
+          unit_cost_usd: line.quantity > 0 ? lineCostUsd / line.quantity : 0,
+          line_cost_usd: lineCostUsd,
+          supplier_id: lm?.supplier_id || null,
+          supplier_name: lm?.supplier_name || "",
+          supplier_phone: lm?.supplier_phone || "",
+          supplier_paid: lm ? !!lm.supplier_paid : false,
+        };
+      });
   }
-
-  const total_cost_usd =
-    lines.length > 0
-      ? lines.reduce((sum, l) => sum + l.line_cost_usd, 0)
-      : supplier_cost_lbp / usdToLbpRate;
 
   const linesWithDisplay = lines.map((l) => ({
     ...l,
@@ -703,22 +715,79 @@ function getOrderBillData(orderCode, apiOrderDetail) {
     line_cost_display: usdToDisplay(l.line_cost_usd, displayCurrency, usdToLbpRate),
   }));
 
-  return {
+  const common = {
     order_code: orderCode,
-    supplier_name,
-    supplier_phone,
-    supplier_cost_lbp,
-    supplier_cost_usd: supplier_cost_lbp / usdToLbpRate,
-    supplier_paid,
     merchant_payout_lbp: summary?.merchant_payout || 0,
     gross_lbp: summary?.gross || 0,
     order_date: summary?.primary_date || String(summary?.dates || "").split(" | ")[0] || "",
     display_currency: displayCurrency,
     usd_to_lbp_rate: usdToLbpRate,
-    lines: linesWithDisplay,
-    total_cost_usd,
-    total_cost_display: usdToDisplay(total_cost_usd, displayCurrency, usdToLbpRate),
   };
+
+  const buildBill = (billSupplier, billLines, fallbackCostLbp = 0) => {
+    const totalCostUsd = billLines.length
+      ? billLines.reduce((sum, line) => sum + Number(line.line_cost_usd || 0), 0)
+      : Number(fallbackCostLbp || 0) / usdToLbpRate;
+    const costLbp = Math.round(totalCostUsd * usdToLbpRate);
+    return {
+      ...common,
+      supplier_id: billSupplier.id || null,
+      supplier_name: billSupplier.name || "(Unassigned)",
+      supplier_phone: billSupplier.phone || "",
+      supplier_paid: !!billSupplier.paid,
+      supplier_cost_lbp: costLbp,
+      supplier_cost_usd: totalCostUsd,
+      lines: billLines,
+      total_cost_usd: totalCostUsd,
+      total_cost_display: usdToDisplay(totalCostUsd, displayCurrency, usdToLbpRate),
+    };
+  };
+
+  const hasLineSupplierAssignments = linesWithDisplay.some(
+    (line) => line.supplier_id || line.supplier_name
+  );
+  if (!hasLineSupplierAssignments) {
+    return [
+      buildBill(
+        { id: summary?.supplier_id, name: supplier_name, phone: supplier_phone, paid: supplier_paid },
+        linesWithDisplay,
+        supplier_cost_lbp
+      ),
+    ];
+  }
+
+  const groups = new Map();
+  for (const line of linesWithDisplay) {
+    const key = line.supplier_id
+      ? "id:" + line.supplier_id
+      : line.supplier_name
+        ? "name:" + line.supplier_name
+        : "unassigned";
+    if (!groups.has(key)) {
+      groups.set(key, {
+        supplier: {
+          id: line.supplier_id || null,
+          name: line.supplier_name || "(Unassigned)",
+          phone: line.supplier_phone || "",
+          paid: true,
+        },
+        lines: [],
+      });
+    }
+    const group = groups.get(key);
+    group.lines.push(line);
+    if (Number(line.line_cost_usd || 0) > 0 && !line.supplier_paid) {
+      group.supplier.paid = false;
+    }
+  }
+
+  return Array.from(groups.values())
+    .map((group) => buildBill(group.supplier, group.lines))
+    .sort((a, b) => a.supplier_name.localeCompare(b.supplier_name));
+}
+
+function getOrderBillData(orderCode, apiOrderDetail) {
+  return getOrderBillDataList(orderCode, apiOrderDetail)[0] || null;
 }
 
 module.exports = {
@@ -736,4 +805,5 @@ module.exports = {
   importOrdersCsv,
   importOrdersCsvFromFile,
   getOrderBillData,
+  getOrderBillDataList,
 };

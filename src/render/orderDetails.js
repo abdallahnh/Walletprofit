@@ -1,4 +1,6 @@
 let currentBillData = null;
+let billDataList = [];
+let currentBillIndex = 0;
 
 function escapeHtml(str) {
   return String(str ?? "")
@@ -117,6 +119,30 @@ function syncBillEdits() {
 
 function getBillDataForAction() {
   return syncBillEdits() || currentBillData;
+}
+
+function configureBillSelector() {
+  const picker = document.getElementById("billSupplierPicker");
+  const select = document.getElementById("billSupplierSelect");
+  select.replaceChildren();
+  billDataList.forEach((bill, index) => {
+    const option = document.createElement("option");
+    option.value = String(index);
+    option.textContent = bill.supplier_name || "(Unassigned)";
+    select.appendChild(option);
+  });
+  select.value = String(currentBillIndex);
+  picker.style.display = billDataList.length > 1 ? "inline-flex" : "none";
+}
+
+function selectBill(index, { render = true } = {}) {
+  if (currentBillData && render) syncBillEdits();
+  const safeIndex = Math.max(0, Math.min(Number(index) || 0, billDataList.length - 1));
+  currentBillIndex = safeIndex;
+  currentBillData = billDataList[safeIndex] || null;
+  const select = document.getElementById("billSupplierSelect");
+  if (select) select.value = String(safeIndex);
+  if (render && currentBillData) renderBill(currentBillData);
 }
 
 function wireBillCostInputs() {
@@ -295,6 +321,9 @@ function closeBillModal() {
 document.getElementById("btnViewBill").addEventListener("click", openBillModal);
 document.getElementById("btnCloseBill").addEventListener("click", closeBillModal);
 document.getElementById("billBackdrop").addEventListener("click", closeBillModal);
+document.getElementById("billSupplierSelect").addEventListener("change", (event) => {
+  selectBill(Number(event.target.value));
+});
 
 document.getElementById("btnPrintBill").addEventListener("click", () => {
   const data = getBillDataForAction();
@@ -351,7 +380,18 @@ document.getElementById("btnExportWord").addEventListener("click", async () => {
 
 window.orderApi.onOrderData((payload) => {
   const order = payload?.order || payload;
-  currentBillData = payload?.billData || null;
+  billDataList = Array.isArray(payload?.billDataList) && payload.billDataList.length
+    ? payload.billDataList
+    : payload?.billData
+      ? [payload.billData]
+      : [];
+  currentBillIndex = 0;
+  currentBillData = billDataList[0] || null;
+  configureBillSelector();
+  const billButton = document.getElementById("btnViewBill");
+  billButton.textContent = billDataList.length > 1
+    ? `Supplier Bills (${billDataList.length})`
+    : "Supplier Bill";
 
   if (!order) return;
 
@@ -398,11 +438,21 @@ window.orderApi.onOrderData((payload) => {
     ? `<a href="${mapsLink}">Open in Maps</a>`
     : "";
 
+  const supplierNames = billDataList.map((bill) => bill.supplier_name).join(", ");
+  const supplierTotalDisplay = billDataList.reduce(
+    (sum, bill) => sum + Number(bill.total_cost_display || 0),
+    0
+  );
+  const paidSupplierCount = billDataList.filter((bill) => bill.supplier_paid).length;
   const supplierLine = currentBillData
-    ? `<div><b>Supplier:</b> ${escapeHtml(currentBillData.supplier_name)}</div>
-       <div><b>Supplier Phone:</b> ${escapeHtml(currentBillData.supplier_phone || "-")}</div>
-       <div><b>Supplier Cost:</b> ${formatAmount(currentBillData.total_cost_display, currentBillData.display_currency)}</div>
-       <div><b>Supplier Paid:</b> ${currentBillData.supplier_paid ? "Yes" : "No"}</div>`
+    ? `<div><b>Supplier${billDataList.length > 1 ? "s" : ""}:</b> ${escapeHtml(supplierNames)}</div>
+       ${billDataList.length === 1
+         ? `<div><b>Supplier Phone:</b> ${escapeHtml(currentBillData.supplier_phone || "-")}</div>`
+         : `<div><b>Supplier Bills:</b> ${billDataList.length} separate bills</div>`}
+       <div><b>Supplier Cost:</b> ${formatAmount(supplierTotalDisplay, currentBillData.display_currency)}</div>
+       <div><b>Supplier Paid:</b> ${billDataList.length > 1
+         ? `${paidSupplierCount}/${billDataList.length}`
+         : currentBillData.supplier_paid ? "Yes" : "No"}</div>`
     : "";
 
   document.getElementById("orderSummary").innerHTML = `

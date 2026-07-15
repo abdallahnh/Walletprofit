@@ -13,7 +13,7 @@ function identity(storeId, walletName) {
 function defaultState(storeId, walletName) {
   const { store, wallet } = identity(storeId, walletName);
   return {
-    version: 1,
+    version: 2,
     store_id: store,
     wallet,
     status: "idle",
@@ -31,14 +31,24 @@ function defaultState(storeId, walletName) {
 function normalizeState(storeId, walletName, value) {
   const fallback = defaultState(storeId, walletName);
   if (!value || typeof value !== "object") return fallback;
+  const rebuildCompletedV1 = Number(value.version || 1) < 2 && value.status === "completed";
   return {
     ...fallback,
     ...value,
+    version: 2,
     store_id: fallback.store_id,
     wallet: fallback.wallet,
-    next_page: Math.max(1, Math.trunc(Number(value.next_page) || 1)),
-    last_synced_head_id: value.last_synced_head_id == null ? null : String(value.last_synced_head_id),
-    cycle_head_id: value.cycle_head_id == null ? null : String(value.cycle_head_id),
+    status: rebuildCompletedV1 ? "idle" : value.status,
+    next_page: rebuildCompletedV1
+      ? 1
+      : Math.max(1, Math.trunc(Number(value.next_page) || 1)),
+    last_completed_page: rebuildCompletedV1 ? null : value.last_completed_page,
+    last_synced_head_id: rebuildCompletedV1 || value.last_synced_head_id == null
+      ? null
+      : String(value.last_synced_head_id),
+    cycle_head_id: rebuildCompletedV1 || value.cycle_head_id == null
+      ? null
+      : String(value.cycle_head_id),
   };
 }
 
@@ -106,13 +116,15 @@ function markFailed(storeId, walletName, error) {
 
 function markCompleted(storeId, walletName, lastPage) {
   const current = get(storeId, walletName);
+  const completedPage = Math.max(1, Math.trunc(Number(lastPage) || 1));
   return save(storeId, walletName, {
     ...current,
     status: "completed",
     next_page: 1,
     last_error: null,
     last_completed_at: new Date().toISOString(),
-    last_completed_page: Math.max(1, Math.trunc(Number(lastPage) || 1)),
+    // Do not let a page-1 incremental watermark check erase the full history depth.
+    last_completed_page: Math.max(Number(current.last_completed_page) || 0, completedPage),
     last_synced_head_id: current.cycle_head_id || current.last_synced_head_id,
     cycle_head_id: null,
   });

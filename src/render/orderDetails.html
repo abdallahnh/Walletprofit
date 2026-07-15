@@ -132,6 +132,21 @@
     }
 
     .bill-toolbar h3 { margin: 0; flex: 1; font-size: 15px; }
+    .bill-supplier-picker {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: #555;
+      font-size: 12px;
+    }
+    .bill-supplier-picker select {
+      max-width: 190px;
+      padding: 7px 9px;
+      border: 1px solid #ccc;
+      border-radius: 7px;
+      background: #fff;
+      font-size: 12px;
+    }
 
     .bill-content { padding: 24px; }
 
@@ -247,6 +262,10 @@
   <div id="billModal" class="bill-modal" role="dialog">
     <div class="bill-toolbar">
       <h3>Supplier Payment Bill</h3>
+      <label class="bill-supplier-picker" id="billSupplierPicker">
+        Supplier
+        <select id="billSupplierSelect" aria-label="Select supplier bill"></select>
+      </label>
       <button class="btn-outline" id="btnCopyBill">Copy for WhatsApp</button>
       <button class="btn-whatsapp" id="btnWhatsAppBill">Send WhatsApp</button>
       <button class="btn-outline" id="btnPrintBill">Print</button>

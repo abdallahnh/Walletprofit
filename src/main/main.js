@@ -486,7 +486,8 @@ ipcMain.handle("open-order", async (_, orderCode) => {
   const order = await loadDetailsByCode(orderCode);
   if (!order) return;
 
-  const billData = ordersDb.getOrderBillData(orderCode, order.order_detail);
+  const billDataList = ordersDb.getOrderBillDataList(orderCode, order.order_detail);
+  const billData = billDataList[0] || null;
 
   const orderPath = path.join(app.getAppPath(), "src", "render", "orderDetails.html");
   const { orderDetailsPreloadJs } = resolveRendererPaths();
@@ -505,16 +506,20 @@ ipcMain.handle("open-order", async (_, orderCode) => {
   win.loadFile(orderPath);
 
   win.webContents.on("did-finish-load", () => {
-    win.webContents.send("order-data", { order, billData });
+    win.webContents.send("order-data", { order, billData, billDataList });
   });
 });
 
 ipcMain.handle("bill:exportExcel", async (_evt, billData) => {
   if (!billData?.order_code) return { ok: false, error: "Missing bill data" };
+  const supplierRef = String(billData.supplier_name || "supplier")
+    .replace(/[^a-z0-9_-]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 50) || "supplier";
 
   const { canceled, filePath } = await dialog.showSaveDialog({
     title: "Save Supplier Bill (Excel)",
-    defaultPath: `supplier-bill-${billData.order_code}.xlsx`,
+    defaultPath: `supplier-bill-${billData.order_code}-${supplierRef}.xlsx`,
     filters: [{ name: "Excel", extensions: ["xlsx"] }],
   });
 
@@ -530,10 +535,14 @@ ipcMain.handle("bill:exportExcel", async (_evt, billData) => {
 
 ipcMain.handle("bill:exportWord", async (_evt, billData) => {
   if (!billData?.order_code) return { ok: false, error: "Missing bill data" };
+  const supplierRef = String(billData.supplier_name || "supplier")
+    .replace(/[^a-z0-9_-]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 50) || "supplier";
 
   const { canceled, filePath } = await dialog.showSaveDialog({
     title: "Save Supplier Bill (Word)",
-    defaultPath: `supplier-bill-${billData.order_code}.doc`,
+    defaultPath: `supplier-bill-${billData.order_code}-${supplierRef}.doc`,
     filters: [
       { name: "Word Document", extensions: ["doc"] },
       { name: "HTML", extensions: ["html"] },
