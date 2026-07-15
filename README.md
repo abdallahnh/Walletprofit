@@ -47,8 +47,8 @@ Before upgrading, ask your ops manager to:
 
 Or copy the database file manually from the paths above.
 
-## 9) Mobile (Android — planned)
-A separate Capacitor project lives in `mobile/` and does **not** affect the Mac/Windows Electron build. See [mobile/README.md](mobile/README.md) for architecture, offline SQLite, and export/import between phone and desktop.
+## 9) Mobile (Android)
+A separate Capacitor project lives in `mobile/` and does **not** affect the Mac/Windows Electron build. It reuses the shared pages, signs each teammate into the same Supabase dataset, caches data offline, and supports Android sharing/backups. See [mobile/README.md](mobile/README.md) for setup, development, and release instructions.
 
 **Export CSV** saves order reconciliation (supplier costs, paid flags). **Import Orders CSV** restores those values.
 **Export Data** saves the entire database (recommended for laptop-to-laptop moves).

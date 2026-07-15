@@ -3,7 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "description": "ANWallet Android app (Capacitor) — separate from desktop Electron build",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
+    "test": "node --test test/*.test.js",
     "sync:ui": "node scripts/sync-ui.js",
     "build": "node scripts/build-www.js",
     "cap:sync": "npm run build && npx cap sync android",
@@ -14,8 +18,15 @@
     "note": "Install Capacitor deps when starting Phase 1: npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor-community/sqlite @capacitor/filesystem @capacitor/share"
   },
   "dependencies": {
-    "@capacitor/android": "^8.4.1",
-    "@capacitor/cli": "^7.6.7",
-    "@capacitor/core": "^8.4.1"
+    "@capacitor/android": "^8.4.2",
+    "@capacitor/browser": "^8.0.4",
+    "@capacitor/cli": "^8.4.2",
+    "@capacitor/core": "^8.4.2",
+    "@capacitor/filesystem": "^8.1.2",
+    "@capacitor/share": "^8.0.1",
+    "chart.js": "^4.5.1"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.2.5"
   }
 }

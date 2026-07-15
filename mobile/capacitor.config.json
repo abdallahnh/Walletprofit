@@ -3,7 +3,7 @@
   "appName": "Wallet Profit",
   "webDir": "www",
   "android": {
-    "allowMixedContent": true
+    "allowMixedContent": false
   },
   "server": {
     "androidScheme": "https"
