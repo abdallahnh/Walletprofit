@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Wallet Profit</string>
+    <string name="title_activity_main">Wallet Profit</string>
+    <string name="package_name">com.wallet.profit.mobile</string>
+    <string name="custom_url_scheme">com.wallet.profit.mobile</string>
+</resources>

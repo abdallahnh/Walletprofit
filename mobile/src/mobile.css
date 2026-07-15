@@ -1,0 +1,76 @@
+:root {
+  color-scheme: light;
+  --mobile-safe-top: env(safe-area-inset-top, 0px);
+  --mobile-safe-right: env(safe-area-inset-right, 0px);
+  --mobile-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --mobile-safe-left: env(safe-area-inset-left, 0px);
+}
+
+html { min-height: 100%; background: #f6f8fa; }
+body.mobile-app {
+  box-sizing: border-box;
+  min-height: 100vh;
+  margin: 0 !important;
+  padding: calc(10px + var(--mobile-safe-top)) calc(10px + var(--mobile-safe-right)) calc(18px + var(--mobile-safe-bottom)) calc(10px + var(--mobile-safe-left)) !important;
+  overscroll-behavior-y: contain;
+  -webkit-text-size-adjust: 100%;
+}
+body.mobile-secondary-page { padding-bottom: calc(76px + var(--mobile-safe-bottom)) !important; }
+
+button, input, select, summary { touch-action: manipulation; }
+button, .menu-btn, .nav-item { min-height: 42px; }
+input, select, textarea { font-size: 16px !important; }
+
+.mobile-back {
+  position: fixed;
+  z-index: 1000;
+  left: calc(10px + var(--mobile-safe-left));
+  bottom: calc(10px + var(--mobile-safe-bottom));
+  min-width: 48px;
+  min-height: 48px;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 999px;
+  color: #fff;
+  background: #17212b;
+  box-shadow: 0 8px 24px rgba(0,0,0,.22);
+}
+
+.wrap { -webkit-overflow-scrolling: touch; }
+.modal-backdrop { z-index: 900; }
+.modal { z-index: 901; max-height: calc(100vh - 32px - var(--mobile-safe-top) - var(--mobile-safe-bottom)); overflow: auto; }
+.bill-backdrop { z-index: 900 !important; }
+.bill-modal { z-index: 901 !important; max-height: calc(100vh - 20px - var(--mobile-safe-top) - var(--mobile-safe-bottom)) !important; }
+
+@media (max-width: 760px) {
+  h1 { font-size: 17px !important; }
+  .app-header { margin-top: 0 !important; }
+  .topbar { padding: 8px !important; }
+  .primary-nav { overflow-x: auto; scrollbar-width: none; }
+  .primary-nav::-webkit-scrollbar { display: none; }
+  .header-actions { width: 100%; overflow-x: auto; flex-wrap: nowrap !important; justify-content: flex-start !important; padding-bottom: 3px; }
+  .header-actions > * { flex: 0 0 auto; }
+  .menu-popover { position: fixed !important; left: 10px; right: 10px; top: auto !important; width: auto !important; max-height: 65vh; overflow: auto; }
+  .sync-status-row { padding: 8px 10px !important; }
+  .workspace-toolbar { padding: 9px !important; }
+  .toolbar-section { width: 100%; }
+  .toolbar-section.filters { min-width: 0 !important; }
+  .toolbar-section > input,
+  .toolbar-section > select { min-width: 145px; flex: 1 1 145px; }
+  table { min-width: 900px; }
+  .supplier-summary table { min-width: 620px; }
+  .toters-balance-banner { margin-top: 8px !important; }
+  .modal { width: calc(100vw - 20px) !important; }
+  .modal-actions, .cloud-actions, .bill-toolbar { flex-wrap: wrap; }
+  .bill-toolbar h3 { flex-basis: 100%; }
+  .bill-supplier-picker { flex: 1 1 100%; }
+  .bill-supplier-picker select { max-width: none !important; flex: 1; }
+  .bill-content { padding: 14px !important; }
+}
+
+@media (max-width: 480px) {
+  .app-brand { min-width: 92px !important; }
+  .nav-item { padding-inline: 8px !important; }
+  .stats { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stat { min-width: 0; overflow: hidden; }
+}
