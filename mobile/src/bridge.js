@@ -12,6 +12,7 @@
   const DB_STORE = "snapshots";
   const DB_KEY = "current";
   const SYNC_INTERVAL_MS = 120000;
+  const MOBILE_BUILD = "1.1.1";
 
   let data = Core.emptyData();
   let session = readJson(AUTH_KEY, null);
@@ -572,6 +573,7 @@
       raw_amount_lbp: parsed.raw_amount_lbp,
       remaining_from_toters_lbp: parsed.remaining_from_toters_lbp,
       fetched_at: new Date().toISOString(),
+      mobile_build: MOBILE_BUILD,
     };
   }
 

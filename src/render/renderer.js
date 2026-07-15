@@ -305,8 +305,9 @@ async function loadTotersRemainingBalance() {
     valueEl.textContent = fmt(res.remaining_from_toters_lbp);
     if (hintEl) {
       const storeLabel = res.store_name ? `${res.store_name} · ` : "";
+      const mobileBuild = res.mobile_build ? ` · mobile ${res.mobile_build}` : "";
       hintEl.textContent =
-        `${storeLabel}wallet "${res.wallet}" · API balance ${Number(res.raw_amount_lbp || 0).toLocaleString()} L.L — pending BOB transfer`;
+        `${storeLabel}wallet "${res.wallet}" · API balance ${Number(res.raw_amount_lbp || 0).toLocaleString()} L.L${mobileBuild} — pending BOB transfer`;
     }
   } catch (e) {
     valueEl.textContent = "—";
