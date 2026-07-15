@@ -405,6 +405,16 @@ tr.line-sub-row td {
     .modal-body input { width:100%; padding:10px; border:1px solid #ddd; border-radius:10px; font-size:12px; }
     .modal-actions { display:flex; gap:10px; justify-content:flex-end; margin-top: 8px; }
     .hint { font-size:12px; color:#666; margin-top: 6px; }
+    .cloud-account-card {
+      padding: 12px;
+      border: 1px solid #dfe3e8;
+      border-radius: 10px;
+      background: #f8fafb;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+    .cloud-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .cloud-danger { color: #b42318; }
 .columns-panel {
   display: none;
   position: absolute;
@@ -543,6 +553,42 @@ th.sortable:hover { background: #f0f0f0; }
     </div>
   </div>
 
+  <!-- Shared Cloud Account Modal -->
+  <div id="cloudModalBackdrop" class="modal-backdrop hidden"></div>
+  <div id="cloudModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="cloudModalTitle">
+    <div class="modal-header">
+      <h3 id="cloudModalTitle">Shared Cloud Data</h3>
+      <button id="btnCloudClose" class="secondary">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="cloudSignedOut">
+        <p class="hint">Sign in with your individual team account. All approved teammates share the same company data.</p>
+        <label>Email</label>
+        <input id="inpCloudEmail" type="email" autocomplete="username" />
+        <label>Password</label>
+        <input id="inpCloudPassword" type="password" autocomplete="current-password" />
+        <div class="modal-actions">
+          <button id="btnCloudSignIn" class="primary">Sign in</button>
+        </div>
+      </div>
+      <div id="cloudSignedIn" class="hidden">
+        <div class="cloud-account-card">
+          <div><b>Account:</b> <span id="cloudAccountEmail"></span></div>
+          <div><b>This computer:</b> revision <span id="cloudLocalRevision">0</span></div>
+          <div><b>Cloud:</b> revision <span id="cloudRemoteRevision">0</span></div>
+          <div><b>Last cloud update:</b> <span id="cloudUpdatedAt">—</span></div>
+        </div>
+        <div class="cloud-actions">
+          <button id="btnCloudSyncNow" class="primary">Sync now</button>
+          <button id="btnCloudDownload" class="secondary">Download cloud</button>
+          <button id="btnCloudReplace" class="secondary cloud-danger">Replace cloud with this computer</button>
+          <button id="btnCloudSignOut" class="secondary">Sign out</button>
+        </div>
+      </div>
+      <div id="cloudModalMsg" class="hint"></div>
+    </div>
+  </div>
+
   <div class="app-header">
     <div class="topbar">
       <div class="app-brand">
@@ -563,6 +609,10 @@ th.sortable:hover { background: #f0f0f0; }
         <details class="menu-dropdown" name="header-menu" data-menu="data">
           <summary class="menu-btn">Data</summary>
           <div class="menu-popover">
+            <span class="menu-popover-label">Cloud</span>
+            <button id="btnCloudAccount">Cloud account</button>
+            <button id="btnCloudSync">Sync shared data</button>
+            <div class="menu-popover-separator"></div>
             <span class="menu-popover-label">Import</span>
             <button id="btnImportWallet">Wallet TSV / CSV</button>
             <button id="btnImportOrdersCsv">Orders CSV</button>
@@ -602,6 +652,10 @@ th.sortable:hover { background: #f0f0f0; }
       <span class="sync-status-item">
         <b>Orders</b>
         <span id="orderSyncStatus">No checkpoint</span>
+      </span>
+      <span class="sync-status-item">
+        <b>Cloud</b>
+        <span id="cloudSyncStatus">Signed out</span>
       </span>
       <span id="status" class="muted"></span>
     </div>

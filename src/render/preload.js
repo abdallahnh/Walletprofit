@@ -39,6 +39,14 @@ contextBridge.exposeInMainWorld("api", {
   exportBackup: () => ipcRenderer.invoke("backup:export"),
   importBackup: () => ipcRenderer.invoke("backup:import"),
 
+  // Shared Supabase cloud data
+  cloudGetStatus: () => ipcRenderer.invoke("cloud:getStatus"),
+  cloudSignIn: (email, password) => ipcRenderer.invoke("cloud:signIn", { email, password }),
+  cloudSignOut: () => ipcRenderer.invoke("cloud:signOut"),
+  cloudSync: () => ipcRenderer.invoke("cloud:sync"),
+  cloudPull: () => ipcRenderer.invoke("cloud:pull"),
+  cloudReplace: () => ipcRenderer.invoke("cloud:replace"),
+
   // Wallet settings + sync
   walletGetConfig: () => ipcRenderer.invoke("wallet:getConfig"),
   walletSaveConfig: (cfg) => ipcRenderer.invoke("wallet:saveConfig", cfg),

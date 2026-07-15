@@ -13,6 +13,7 @@ const ordersDb = require("../src/db/orders");
 const orderSyncState = require("../src/db/orderSyncState");
 const walletSyncState = require("../src/db/walletSyncState");
 const { runCheckpointedOrderSync } = require("../src/services/salesOrderSync");
+const { createSupabaseCloud, snapshotHash } = require("../src/services/supabaseCloud");
 
 function createDatabase() {
   database.closeDatabase();
@@ -481,4 +482,53 @@ test("multi-supplier orders create one bill per supplier", () => {
       },
     ]
   );
+});
+
+test("cloud snapshot hashing ignores only its export timestamp", () => {
+  const first = snapshotHash({ exported_at: "2026-01-01", transactions: [{ id: 1 }] });
+  const second = snapshotHash({ exported_at: "2026-07-15", transactions: [{ id: 1 }] });
+  const changed = snapshotHash({ exported_at: "2026-07-15", transactions: [{ id: 2 }] });
+  assert.equal(first, second);
+  assert.notEqual(first, changed);
+});
+
+test("cloud upload uses an authenticated revision and detects stale writes", async () => {
+  const calls = [];
+  const responses = [
+    {
+      access_token: "access-token",
+      refresh_token: "refresh-token",
+      user: { id: "user-1", email: "member@example.com" },
+    },
+    [{ revision: 1 }],
+    [],
+  ];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url, options });
+    const payload = responses.shift();
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(payload),
+      json: async () => payload,
+    };
+  };
+  const savedStates = [];
+  const cloud = createSupabaseCloud({
+    fetchImpl,
+    onStateChange: (state) => savedStates.push(state),
+  });
+
+  const signedIn = await cloud.signIn("member@example.com", "password");
+  assert.equal(signedIn.email, "member@example.com");
+  const uploaded = await cloud.pushSnapshot({ transactions: [{ id: 1 }] }, 0);
+  assert.equal(uploaded.revision, 1);
+  assert.equal(cloud.getPublicState().revision, 1);
+  assert.match(calls[1].options.headers.Authorization, /^Bearer access-token$/);
+
+  await assert.rejects(
+    () => cloud.pushSnapshot({ transactions: [{ id: 2 }] }, 1),
+    (error) => error.code === "CLOUD_CONFLICT"
+  );
+  assert.equal(savedStates.at(-1).revision, 1);
 });

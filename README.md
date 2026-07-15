@@ -52,3 +52,27 @@ A separate Capacitor project lives in `mobile/` and does **not** affect the Mac/
 
 **Export CSV** saves order reconciliation (supplier costs, paid flags). **Import Orders CSV** restores those values.
 **Export Data** saves the entire database (recommended for laptop-to-laptop moves).
+
+## 10) Shared cloud data (Supabase)
+
+The desktop app keeps SQLite for offline use and synchronizes a versioned snapshot with Supabase.
+Each teammate signs in with an individual Supabase Auth account, while authenticated team members
+share the same company dataset.
+
+One-time administrator setup:
+
+1. Open Supabase Dashboard → SQL Editor.
+2. Run `supabase/migrations/20260715_wallet_profit_cloud.sql`.
+3. In Authentication settings, disable public user sign-ups.
+4. In Authentication → Users, create an email/password account for each approved teammate.
+5. On the primary computer, open Data → Cloud account, sign in, and click **Sync now** to upload
+   the existing local database.
+6. On each additional computer, sign in and choose **Download cloud** for its first sync.
+
+After the first sync, the app checks the shared data automatically every two minutes. Data remains
+usable offline. When two computers both change from the same revision, the app blocks silent
+overwrites and asks the user to explicitly download the cloud version or replace it. A local SQLite
+safety backup is created automatically before every cloud download.
+
+Never put the Supabase database password or service-role key in the application. The bundled
+publishable key is used only with authenticated sessions and Row Level Security.

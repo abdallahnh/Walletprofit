@@ -18,6 +18,7 @@ const salesFrom = $("salesFrom");
 const salesTo = $("salesTo");
 const orderSyncStatusEl = $("orderSyncStatus");
 const walletSyncStatusEl = $("walletSyncStatus");
+const cloudSyncStatusEl = $("cloudSyncStatus");
 
 // Wallet modal elements
 const walletBackdrop = $("walletModalBackdrop");
@@ -29,6 +30,12 @@ const inpToken = $("inpToken");
 const inpUsdToLbpRate = $("inpUsdToLbpRate");
 const selDisplayCurrency = $("selDisplayCurrency");
 const walletMsg = $("walletModalMsg");
+
+const cloudBackdrop = $("cloudModalBackdrop");
+const cloudModal = $("cloudModal");
+const cloudMsg = $("cloudModalMsg");
+const inpCloudEmail = $("inpCloudEmail");
+const inpCloudPassword = $("inpCloudPassword");
 
 let currentCurrency = "USD";
 let usdToLbpRate = 90000;
@@ -44,6 +51,7 @@ let supplierColorById = new Map();
 let selectedOrderCode = null;
 let expandedItemOrders = new Set();
 let lineMetaCache = new Map();
+let automaticCloudSyncRunning = false;
 
 document.querySelectorAll(".menu-dropdown .menu-popover button").forEach((button) => {
   button.addEventListener("click", () => {
@@ -200,6 +208,85 @@ function supplierCostDisplayToLbp(displayValue) {
 
 function setError(e) {
   err.textContent = e ? String(e) : "";
+}
+
+function renderCloudStatus(status) {
+  const signedIn = !!status?.signed_in;
+  $("cloudSignedOut").classList.toggle("hidden", signedIn);
+  $("cloudSignedIn").classList.toggle("hidden", !signedIn);
+  cloudSyncStatusEl.textContent = signedIn
+    ? `${status.email || "Team account"} · r${status.remote_revision ?? status.revision ?? 0}`
+    : "Signed out";
+  if (!signedIn) return;
+  $("cloudAccountEmail").textContent = status.email || "";
+  $("cloudLocalRevision").textContent = String(status.revision || 0);
+  $("cloudRemoteRevision").textContent = String(status.remote_revision || 0);
+  $("cloudUpdatedAt").textContent = status.remote_updated_at
+    ? new Date(status.remote_updated_at).toLocaleString()
+    : "No cloud data yet";
+}
+
+async function refreshCloudStatus() {
+  const status = await window.api.cloudGetStatus();
+  renderCloudStatus(status);
+  if (!status?.ok && status?.error) cloudMsg.textContent = status.error;
+  return status;
+}
+
+function openCloudModal() {
+  cloudMsg.textContent = "";
+  cloudBackdrop.classList.remove("hidden");
+  cloudModal.classList.remove("hidden");
+  refreshCloudStatus().catch((error) => { cloudMsg.textContent = String(error); });
+}
+
+function closeCloudModal() {
+  cloudBackdrop.classList.add("hidden");
+  cloudModal.classList.add("hidden");
+  inpCloudPassword.value = "";
+}
+
+async function runCloudSync() {
+  setError("");
+  cloudMsg.textContent = "Syncing shared data…";
+  const result = await window.api.cloudSync();
+  if (!result?.ok) {
+    const message = result?.error || "Cloud sync failed";
+    cloudMsg.textContent = message;
+    setError(message);
+    await refreshCloudStatus();
+    return result;
+  }
+  const labels = {
+    uploaded: `Uploaded this computer to cloud revision ${result.revision}.`,
+    downloaded: `Downloaded cloud revision ${result.revision}.`,
+    current: "This computer and the cloud are already current.",
+  };
+  cloudMsg.textContent = labels[result.action] || "Cloud sync complete.";
+  await refreshCloudStatus();
+  if (result.action === "downloaded") await refresh();
+  return result;
+}
+
+async function runAutomaticCloudSync() {
+  if (automaticCloudSyncRunning) return;
+  automaticCloudSyncRunning = true;
+  try {
+    const status = await window.api.cloudGetStatus();
+    renderCloudStatus(status);
+    if (!status?.ok || !status.signed_in || !status.revision) return;
+    const result = await window.api.cloudSync();
+    if (!result?.ok) {
+      if (result?.conflict) cloudSyncStatusEl.textContent = "Conflict · open Cloud account";
+      return;
+    }
+    await refreshCloudStatus();
+    if (result.action === "downloaded") await refresh();
+  } catch {
+    // Keep local/offline operation available; the next interval retries.
+  } finally {
+    automaticCloudSyncRunning = false;
+  }
 }
 
 async function loadTotersRemainingBalance() {
@@ -1078,6 +1165,75 @@ $("btnCompanyExpenses").addEventListener("click", () => {
   window.api.openCompanyExpenses();
 });
 
+$("btnCloudAccount").addEventListener("click", openCloudModal);
+$("btnCloudSync").addEventListener("click", async () => {
+  const status = await refreshCloudStatus();
+  if (!status?.signed_in) {
+    openCloudModal();
+    cloudMsg.textContent = "Sign in before syncing shared data.";
+    return;
+  }
+  await runCloudSync();
+  openCloudModal();
+});
+$("btnCloudClose").addEventListener("click", closeCloudModal);
+cloudBackdrop.addEventListener("click", closeCloudModal);
+
+$("btnCloudSignIn").addEventListener("click", async () => {
+  cloudMsg.textContent = "Signing in…";
+  $("btnCloudSignIn").disabled = true;
+  try {
+    const result = await window.api.cloudSignIn(
+      inpCloudEmail.value.trim(),
+      inpCloudPassword.value
+    );
+    if (!result?.ok) {
+      cloudMsg.textContent = result?.error || "Sign in failed";
+      return;
+    }
+    inpCloudPassword.value = "";
+    renderCloudStatus(result);
+    cloudMsg.textContent = result.cloud_empty
+      ? "Signed in. Click Sync now to upload this computer's existing data."
+      : "Signed in. Click Sync now; if this is a new computer, choose Download cloud.";
+  } catch (error) {
+    cloudMsg.textContent = String(error);
+  } finally {
+    $("btnCloudSignIn").disabled = false;
+  }
+});
+
+$("btnCloudSignOut").addEventListener("click", async () => {
+  const result = await window.api.cloudSignOut();
+  renderCloudStatus(result);
+  cloudMsg.textContent = result?.ok ? "Signed out." : result?.error || "Could not sign out";
+});
+
+$("btnCloudSyncNow").addEventListener("click", runCloudSync);
+
+$("btnCloudDownload").addEventListener("click", async () => {
+  if (!confirm("Replace this computer's current data with the cloud copy? A local safety backup will be created first.")) return;
+  cloudMsg.textContent = "Downloading cloud data…";
+  const result = await window.api.cloudPull();
+  if (!result?.ok) {
+    cloudMsg.textContent = result?.error || "Cloud download failed";
+    return;
+  }
+  cloudMsg.textContent = `Downloaded cloud revision ${result.revision}. A safety backup was created.`;
+  await refreshCloudStatus();
+  await refresh();
+});
+
+$("btnCloudReplace").addEventListener("click", async () => {
+  if (!confirm("Replace the shared cloud data with this computer's data? Other teammates will receive this version on their next sync.")) return;
+  cloudMsg.textContent = "Uploading this computer…";
+  const result = await window.api.cloudReplace();
+  cloudMsg.textContent = result?.ok
+    ? `Cloud replaced safely at revision ${result.revision}.`
+    : result?.error || "Cloud upload failed";
+  await refreshCloudStatus();
+});
+
 // Modal buttons
 $("btnWalletClose").addEventListener("click", closeWalletModal);
 $("btnWalletCancel").addEventListener("click", closeWalletModal);
@@ -1291,5 +1447,8 @@ loadWalletConfig().then(() => {
   applyColumnVisibility();
   updateWalletSyncStatus().catch(setError);
   updateOrderSyncStatus().catch(setError);
+  refreshCloudStatus().catch(setError);
   refresh().catch(setError);
+  setTimeout(() => runAutomaticCloudSync(), 3000);
+  setInterval(() => runAutomaticCloudSync(), 120000);
 });

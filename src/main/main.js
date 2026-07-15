@@ -1,5 +1,6 @@
 // src/main/main.js
-const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell, safeStorage } = require("electron");
+const fs = require("node:fs");
 const path = require("path");
 const XLSX = require("xlsx");
 
@@ -21,6 +22,130 @@ const logger = require("../utils/logger");
 const { syncOrders, loadDetailsByCode } = require("../services/orderService");
 const { runCheckpointedOrderSync } = require("../services/salesOrderSync");
 const { setAuthToken, setBaseUrl } = require("../services/totersApi");
+const { createSupabaseCloud } = require("../services/supabaseCloud");
+
+let cloud;
+
+function cloudStatePath() {
+  return path.join(app.getPath("userData"), "cloud-session.bin");
+}
+
+function loadCloudState() {
+  try {
+    if (!safeStorage.isEncryptionAvailable() || !fs.existsSync(cloudStatePath())) return {};
+    const encrypted = fs.readFileSync(cloudStatePath());
+    return JSON.parse(safeStorage.decryptString(encrypted));
+  } catch (error) {
+    logger.error("Could not restore cloud session", { error: String(error) });
+    return {};
+  }
+}
+
+function saveCloudState(state) {
+  try {
+    if (!safeStorage.isEncryptionAvailable()) return;
+    const encrypted = safeStorage.encryptString(JSON.stringify(state));
+    fs.writeFileSync(cloudStatePath(), encrypted, { mode: 0o600 });
+  } catch (error) {
+    logger.error("Could not save cloud session", { error: String(error) });
+  }
+}
+
+function initializeCloud() {
+  cloud = createSupabaseCloud({
+    initialState: loadCloudState(),
+    onStateChange: saveCloudState,
+  });
+}
+
+async function getCloudStatus({ checkRemote = true } = {}) {
+  const local = cloud.getPublicState();
+  if (!local.signed_in || !checkRemote) return { ok: true, ...local };
+  try {
+    const remote = await cloud.getRemoteSnapshot();
+    return {
+      ok: true,
+      ...cloud.getPublicState(),
+      remote_revision: Number(remote?.revision || 0),
+      remote_updated_at: remote?.updated_at || null,
+      cloud_empty: !remote,
+    };
+  } catch (error) {
+    return { ok: false, ...cloud.getPublicState(), error: String(error.message || error) };
+  }
+}
+
+async function pullCloudSnapshot() {
+  const remote = await cloud.getRemoteSnapshot();
+  if (!remote?.data) throw new Error("There is no cloud data to download yet.");
+  const safetyBackup = path.join(
+    path.dirname(database.getDbPath()),
+    `wallet-profit-before-cloud-${Date.now()}.db`
+  );
+  await walletDb.exportSqliteBackup(safetyBackup);
+  const imported = walletDb.importBackupData(remote.data, { replace: true });
+  if (!imported?.ok) throw new Error(imported?.error || "Could not import cloud data");
+  cloud.markPulled(remote);
+  return {
+    ok: true,
+    action: "downloaded",
+    revision: Number(remote.revision),
+    imported,
+    safety_backup: safetyBackup,
+  };
+}
+
+async function syncCloudSnapshot() {
+  const localData = walletDb.collectBackupData();
+  const localHash = cloud.snapshotHash(localData);
+  const state = cloud.getPublicState();
+  const remote = await cloud.getRemoteSnapshot();
+
+  if (!remote) {
+    const uploaded = await cloud.pushSnapshot(localData, 0);
+    return { ok: true, action: "uploaded", revision: Number(uploaded.revision) };
+  }
+
+  const remoteRevision = Number(remote.revision || 0);
+  if (!state.revision) {
+    return {
+      ok: false,
+      conflict: true,
+      needs_choice: true,
+      remote_revision: remoteRevision,
+      error: "This computer has not synced with the existing cloud data. Choose Download Cloud or Replace Cloud.",
+    };
+  }
+
+  const localChanged = localHash !== state.last_snapshot_hash;
+  if (remoteRevision > state.revision) {
+    if (localChanged) {
+      return {
+        ok: false,
+        conflict: true,
+        remote_revision: remoteRevision,
+        error: "Both this computer and the cloud changed. Download or replace the cloud explicitly.",
+      };
+    }
+    return pullCloudSnapshot();
+  }
+
+  if (remoteRevision < state.revision) {
+    return {
+      ok: false,
+      conflict: true,
+      remote_revision: remoteRevision,
+      error: "The cloud revision is older than this computer. Use an explicit cloud action.",
+    };
+  }
+
+  if (!localChanged) {
+    return { ok: true, action: "current", revision: remoteRevision };
+  }
+
+  const uploaded = await cloud.pushSnapshot(localData, remoteRevision);
+  return { ok: true, action: "uploaded", revision: Number(uploaded.revision) };
+}
 
 function buildAppMenu(win) {
   const isMac = process.platform === "darwin";
@@ -166,6 +291,7 @@ app.whenReady().then(() => {
   const userData = app.getPath("userData");
   logger.setLogFile(userData);
   database.initDatabase(userData);
+  initializeCloud();
   createWindow();
 });
 
@@ -470,6 +596,58 @@ ipcMain.handle("backup:import", async () => {
   }
 
   return walletDb.importBackupJsonFromFile(filePath, { replace: true });
+});
+
+ipcMain.handle("cloud:getStatus", async () => getCloudStatus());
+
+ipcMain.handle("cloud:signIn", async (_event, credentials) => {
+  try {
+    const email = String(credentials?.email || "").trim();
+    const password = String(credentials?.password || "");
+    if (!email || !password) return { ok: false, error: "Email and password are required." };
+    await cloud.signIn(email, password);
+    return getCloudStatus();
+  } catch (error) {
+    return { ok: false, error: String(error.message || error) };
+  }
+});
+
+ipcMain.handle("cloud:signOut", async () => {
+  try {
+    await cloud.signOut();
+    return { ok: true, ...cloud.getPublicState() };
+  } catch (error) {
+    return { ok: false, error: String(error.message || error) };
+  }
+});
+
+ipcMain.handle("cloud:sync", async () => {
+  try {
+    return await syncCloudSnapshot();
+  } catch (error) {
+    return { ok: false, conflict: error.code === "CLOUD_CONFLICT", error: String(error.message || error) };
+  }
+});
+
+ipcMain.handle("cloud:pull", async () => {
+  try {
+    return await pullCloudSnapshot();
+  } catch (error) {
+    return { ok: false, error: String(error.message || error) };
+  }
+});
+
+ipcMain.handle("cloud:replace", async () => {
+  try {
+    const remote = await cloud.getRemoteSnapshot();
+    const uploaded = await cloud.pushSnapshot(
+      walletDb.collectBackupData(),
+      Number(remote?.revision || 0)
+    );
+    return { ok: true, action: "uploaded", revision: Number(uploaded.revision) };
+  } catch (error) {
+    return { ok: false, conflict: error.code === "CLOUD_CONFLICT", error: String(error.message || error) };
+  }
 });
 
 ipcMain.handle("open-order", async (_, orderCode) => {
