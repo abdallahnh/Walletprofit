@@ -7,6 +7,47 @@ const { normalizeOrderDetailItems, countAdjustedItems } = require("./orderDetail
 let cachedOrders = [];
 let cachedByCode = new Map();
 
+function parseOrdersPage(result) {
+  const list =
+    result?.data?.orders?.data ?? result?.orders?.data ?? result?.data ?? result ?? [];
+  const rows = Array.isArray(list) ? list : [];
+  const orders = [];
+
+  for (const row of rows) {
+    const summary = row?.order && typeof row.order === "object" ? row.order : row;
+    const code = summary?.code ?? row?.code ?? null;
+    const id = summary?.id ?? row?.id ?? row?.order_id ?? null;
+    if (!code || !id) continue;
+    const candidateIds = Array.from(
+      new Set(
+        [
+          summary?.id,
+          row?.id,
+          summary?.order_id,
+          row?.order_id,
+          summary?.orderId,
+          row?.orderId,
+          code,
+        ]
+          .map((v) => (v == null ? null : String(v).trim()))
+          .filter(Boolean)
+      )
+    );
+    orders.push({ ...summary, code, id, _candidateIds: candidateIds });
+  }
+
+  const nextPageUrl =
+    result?.data?.orders?.next_page_url ?? result?.orders?.next_page_url ?? null;
+  return { orders, rawCount: rows.length, hasNextPage: !!nextPageUrl };
+}
+
+async function syncOrdersPage(storeId, page) {
+  const parsed = parseOrdersPage(await getOrders(storeId, page));
+  for (const order of parsed.orders) cachedByCode.set(order.code, order);
+  cachedOrders = Array.from(cachedByCode.values());
+  return parsed;
+}
+
 async function syncOrders(storeId) {
   const all = [];
   let page = 1;
@@ -14,40 +55,10 @@ async function syncOrders(storeId) {
 
   while (guard < 500) {
     guard += 1;
-    const result = await getOrders(storeId, page);
-
-    const list =
-      result?.data?.orders?.data ?? result?.orders?.data ?? result?.data ?? result ?? [];
-    const rows = Array.isArray(list) ? list : [];
-
-    if (!rows.length) break;
-    for (const row of rows) {
-      // Some APIs wrap order summary under "order".
-      const summary = row?.order && typeof row.order === "object" ? row.order : row;
-      const code = summary?.code ?? row?.code ?? null;
-      const id = summary?.id ?? row?.id ?? row?.order_id ?? null;
-      if (!code || !id) continue;
-      const candidateIds = Array.from(
-        new Set(
-          [
-            summary?.id,
-            row?.id,
-            summary?.order_id,
-            row?.order_id,
-            summary?.orderId,
-            row?.orderId,
-            code, // Some APIs accept order code on details endpoint.
-          ]
-            .map((v) => (v == null ? null : String(v).trim()))
-            .filter(Boolean)
-        )
-      );
-      all.push({ ...summary, code, id, _candidateIds: candidateIds });
-    }
-
-    const nextPageUrl =
-      result?.data?.orders?.next_page_url ?? result?.orders?.next_page_url ?? null;
-    if (!nextPageUrl) break;
+    const result = parseOrdersPage(await getOrders(storeId, page));
+    if (!result.rawCount) break;
+    all.push(...result.orders);
+    if (!result.hasNextPage) break;
     page += 1;
   }
 
@@ -102,4 +113,4 @@ async function loadDetailsByCode(code) {
   return finalOrder;
 }
 
-module.exports = { syncOrders, loadDetailsByCode };
+module.exports = { syncOrders, syncOrdersPage, loadDetailsByCode, parseOrdersPage };

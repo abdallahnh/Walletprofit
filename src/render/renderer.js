@@ -16,6 +16,8 @@ const columnsPanel = $("columnsPanel");
 
 const salesFrom = $("salesFrom");
 const salesTo = $("salesTo");
+const orderSyncStatusEl = $("orderSyncStatus");
+const walletSyncStatusEl = $("walletSyncStatus");
 
 // Wallet modal elements
 const walletBackdrop = $("walletModalBackdrop");
@@ -950,40 +952,85 @@ $("btnImportData").addEventListener("click", async () => {
   }
 });
 
-$("btnResetSupplier").addEventListener("click", async () => {
-  if (!confirm("Reset all supplier costs & paid flags?")) return;
-  try {
-    await window.api.resetSupplierMeta();
-    await refresh();
-  } catch (e) {
-    setError(e);
-  }
-});
-
 $("btnWalletSettings").addEventListener("click", async () => {
   try { await loadWalletConfigAndOpen(); } catch (e) { setError(e); }
 });
+
+function renderWalletSyncStatus(checkpoint) {
+  if (!walletSyncStatusEl) return;
+  if (!checkpoint || checkpoint.status === "idle") {
+    walletSyncStatusEl.textContent = "No checkpoint";
+    return;
+  }
+  if (checkpoint.status === "completed") {
+    const when = checkpoint.last_completed_at
+      ? new Date(checkpoint.last_completed_at).toLocaleString()
+      : "recently";
+    walletSyncStatusEl.textContent =
+      "Complete through page " + (checkpoint.last_completed_page || 1) + " (" + when + ")";
+    return;
+  }
+  walletSyncStatusEl.textContent =
+    (checkpoint.status === "failed" ? "Paused" : "Resume") +
+    ": page " + checkpoint.next_page;
+}
+
+async function updateWalletSyncStatus() {
+  const res = await window.api.walletGetSyncStatus();
+  if (res?.ok) renderWalletSyncStatus(res.checkpoint);
+}
 
 $("btnWalletSync").addEventListener("click", async () => {
   try {
     setError("");
     statusEl.textContent = "Syncing wallet…";
     $("btnWalletSync").disabled = true;
+    $("btnResetWalletSync").disabled = true;
 
     const res = await window.api.walletSync();
-
-    $("btnWalletSync").disabled = false;
-    statusEl.textContent = "";
+    renderWalletSyncStatus(res?.checkpoint);
 
     if (!res.ok) {
-      setError(res.error || "Sync failed");
+      const resume = res?.checkpoint
+        ? " Wallet sync paused at page " + res.checkpoint.next_page + "."
+        : "";
+      setError((res.error || "Sync failed") + resume);
       return;
     }
     await refresh();
-    alert(`Synced. Fetched: ${res.totalFetched} | Inserted: ${res.totalInserted} | Duplicates ignored: ${res.totalIgnored} | Pages: ${res.pages}`);
+    alert(
+      "Wallet synced.\n" +
+      "Pages: " + (res.startPage || 1) + "–" +
+        ((res.startPage || 1) + Math.max(0, (res.pages || 1) - 1)) + "\n" +
+      "Fetched: " + (res.totalFetched || 0) + "\n" +
+      "New transactions considered: " + (res.totalConsidered || 0) + "\n" +
+      "Inserted: " + (res.totalInserted || 0) + "\n" +
+      "Duplicates ignored: " + (res.totalIgnored || 0) + "\n" +
+      "Stopped at previous sync point: " + (res.stoppedAtWatermark ? "Yes" : "No")
+    );
   } catch (e) {
+    setError(e);
+  } finally {
     $("btnWalletSync").disabled = false;
+    $("btnResetWalletSync").disabled = false;
     statusEl.textContent = "";
+  }
+});
+
+$("btnResetWalletSync").addEventListener("click", async () => {
+  if (!confirm("Reset the saved wallet-sync checkpoint? The next sync will start again at page 1. Existing transactions will not be deleted.")) {
+    return;
+  }
+  try {
+    setError("");
+    const res = await window.api.walletResetSync();
+    if (!res?.ok) {
+      setError(res?.error || "Could not reset wallet sync checkpoint");
+      return;
+    }
+    renderWalletSyncStatus(res.checkpoint);
+    statusEl.textContent = "Wallet sync checkpoint reset. The next sync starts at page 1.";
+  } catch (e) {
     setError(e);
   }
 });
@@ -1026,7 +1073,12 @@ $("btnWalletSave").addEventListener("click", async () => {
       usdToLbpRate: Number(inpUsdToLbpRate.value) || 90000,
       displayCurrency: selDisplayCurrency.value || "USD"
     };
-    await window.api.walletSaveConfig(cfg);
+    const saved = await window.api.walletSaveConfig(cfg);
+    if (!saved?.ok) {
+      walletMsg.textContent = "Error: " + (saved?.error || "Could not save wallet settings");
+      return;
+    }
+    await updateWalletSyncStatus();
     walletMsg.textContent = "Saved.";
     setTimeout(closeWalletModal, 400);
   } catch (e) {
@@ -1113,24 +1165,55 @@ $("btnExportSalesExcel").addEventListener("click", async () => {
   }
 });
 
+function renderOrderSyncStatus(checkpoint) {
+  if (!orderSyncStatusEl) return;
+  if (!checkpoint || checkpoint.status === "idle") {
+    orderSyncStatusEl.textContent = "No checkpoint";
+    return;
+  }
+  if (checkpoint.status === "completed") {
+    const when = checkpoint.last_completed_at
+      ? new Date(checkpoint.last_completed_at).toLocaleString()
+      : "recently";
+    orderSyncStatusEl.textContent = `Complete through page ${checkpoint.last_completed_page || 1} (${when})`;
+    return;
+  }
+  const order = checkpoint.failed_order_code ? `, order ${checkpoint.failed_order_code}` : "";
+  const prefix = checkpoint.status === "failed" ? "Paused" : "Resume";
+  orderSyncStatusEl.textContent =
+    `${prefix}: page ${checkpoint.next_page}, ${checkpoint.completed_on_page || 0} done${order}`;
+}
+
+async function updateOrderSyncStatus() {
+  const res = await window.api.salesGetOrderSyncStatus();
+  if (res?.ok) renderOrderSyncStatus(res.checkpoint);
+}
+
 $("btnSyncSales").addEventListener("click", async () => {
   try {
     setError("");
     statusEl.textContent = "Syncing sales from orders…";
     $("btnSyncSales").disabled = true;
+    $("btnResetOrderSync").disabled = true;
 
     const res = await window.api.salesSyncFromOrders();
-
-    $("btnSyncSales").disabled = false;
-    statusEl.textContent = "";
+    renderOrderSyncStatus(res?.checkpoint);
 
     if (!res?.ok) {
-      setError(res?.error || "Sync sales failed");
+      const checkpoint = res?.checkpoint;
+      const resume = checkpoint
+        ? ` Sync paused at page ${checkpoint.next_page}` +
+          (checkpoint.failed_order_code ? `, order ${checkpoint.failed_order_code}.` : ".")
+        : "";
+      setError((res?.error || "Sync sales failed") + resume);
       return;
     }
     alert(
       `Synced sales from orders.\n` +
+      `Pages: ${res.startPage || 1}–${res.lastPage || 1}\n` +
       `Fetched: ${res.fetched || 0}\n` +
+      `Skipped from checkpoint: ${res.skippedAlreadyCompleted || 0}\n` +
+      `Stopped at previous sync point: ${res.stoppedAtWatermark ? "Yes" : "No"}\n` +
       `Skipped invalid summaries: ${res.skippedInvalidSummaries || 0}\n` +
       `Processed: ${res.processed || 0}\n` +
       `Details loaded: ${res.detailsLoaded || 0}\n` +
@@ -1144,8 +1227,28 @@ $("btnSyncSales").addEventListener("click", async () => {
       `Skipped (unmatched product): ${res.skippedUnmatchedProductItems || 0}`
     );
   } catch (e) {
+    setError(e);
+  } finally {
     $("btnSyncSales").disabled = false;
+    $("btnResetOrderSync").disabled = false;
     statusEl.textContent = "";
+  }
+});
+
+$("btnResetOrderSync").addEventListener("click", async () => {
+  if (!confirm("Reset the saved order-sync checkpoint? The next sync will start again at page 1. Existing sales data will not be deleted.")) {
+    return;
+  }
+  try {
+    setError("");
+    const res = await window.api.salesResetOrderSync();
+    if (!res?.ok) {
+      setError(res?.error || "Could not reset order sync checkpoint");
+      return;
+    }
+    renderOrderSyncStatus(res.checkpoint);
+    statusEl.textContent = "Order sync checkpoint reset. The next sync starts at page 1.";
+  } catch (e) {
     setError(e);
   }
 });
@@ -1163,5 +1266,7 @@ loadWalletConfig().then(() => {
   });
   renderColumnsPanel();
   applyColumnVisibility();
+  updateWalletSyncStatus().catch(setError);
+  updateOrderSyncStatus().catch(setError);
   refresh().catch(setError);
 });

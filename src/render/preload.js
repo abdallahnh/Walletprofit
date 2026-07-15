@@ -43,6 +43,8 @@ contextBridge.exposeInMainWorld("api", {
   walletGetConfig: () => ipcRenderer.invoke("wallet:getConfig"),
   walletSaveConfig: (cfg) => ipcRenderer.invoke("wallet:saveConfig", cfg),
   walletSync: () => ipcRenderer.invoke("wallet:sync"),
+  walletGetSyncStatus: () => ipcRenderer.invoke("wallet:getSyncStatus"),
+  walletResetSync: () => ipcRenderer.invoke("wallet:resetSync"),
   walletGetRemainingBalance: () => ipcRenderer.invoke("wallet:getRemainingBalance"),
   openOrder: (code) => ipcRenderer.invoke("open-order", code),
 
@@ -67,6 +69,8 @@ contextBridge.exposeInMainWorld("api", {
   salesProfitMarginAnalysis: (opts) => ipcRenderer.invoke("sales:profitMarginAnalysis", opts || {}),
   salesExportExcel: (opts) => ipcRenderer.invoke("sales:exportExcel", opts || {}),
   salesSyncFromOrders: () => ipcRenderer.invoke("sales:syncFromOrders"),
+  salesGetOrderSyncStatus: () => ipcRenderer.invoke("sales:getOrderSyncStatus"),
+  salesResetOrderSync: () => ipcRenderer.invoke("sales:resetOrderSync"),
 
   // Revenue Dashboard
   openRevenueDashboard: () => ipcRenderer.invoke("open-revenue-dashboard"),

@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const Database = require("better-sqlite3");
 const { getDb, getDbPath, replaceDatabaseFromFile } = require("./database");
+const walletSyncState = require("./walletSyncState");
 
 const BACKUP_SCHEMA_VERSION = 4;
 
@@ -197,85 +198,133 @@ async function syncWallet() {
   let trustedBaseUrl;
   try {
     trustedBaseUrl = normalizeHttpBaseUrl(cfg.baseUrl);
-  } catch (e) {
-    return { ok: false, error: String(e.message || e) };
+  } catch (error) {
+    return { ok: false, error: String(error.message || error) };
   }
+
+  const walletName = cfg.wallet || "main";
   const trustedOrigin = new URL(trustedBaseUrl).origin;
-  let nextUrl = `${trustedBaseUrl}/api/stores/${encodeURIComponent(cfg.storeId)}/wallet/all?page=1&wallet=${encodeURIComponent(
-    cfg.wallet || "main"
-  )}`;
+  let state = walletSyncState.begin(cfg.storeId, walletName);
+  const startPage = state.next_page;
+  let pages = 0;
   let totalFetched = 0;
+  let totalConsidered = 0;
   let totalInserted = 0;
   let totalIgnored = 0;
-  let pages = 0;
 
-  const stmt = db.prepare(`
-    INSERT OR IGNORE INTO transactions(id, store_id, amount, wallet, reason, type, created_at, order_code)
-    VALUES(@id, @store_id, @amount, @wallet, @reason, @type, @created_at, @order_code)
-  `);
-
+  const stmt = db.prepare(
+    "INSERT OR IGNORE INTO transactions " +
+    "(id, store_id, amount, wallet, reason, type, created_at, order_code) " +
+    "VALUES (@id, @store_id, @amount, @wallet, @reason, @type, @created_at, @order_code)"
+  );
   const insertMany = db.transaction((items) => {
-    let inserted = 0,
-      ignored = 0;
-    for (const it of items) {
-      const order_code = extractOrderCode(it.reason);
+    let inserted = 0;
+    let ignored = 0;
+    for (const item of items) {
       const info = stmt.run({
-        id: it.id,
-        store_id: it.store_id ?? null,
-        amount: Math.trunc(it.amount || 0),
-        wallet: it.wallet || null,
-        reason: it.reason || "",
-        type: it.type || "",
-        created_at: it.created_at || "",
-        order_code,
+        id: item.id,
+        store_id: item.store_id ?? null,
+        amount: Math.trunc(item.amount || 0),
+        wallet: item.wallet || null,
+        reason: item.reason || "",
+        type: item.type || "",
+        created_at: item.created_at || "",
+        order_code: extractOrderCode(item.reason),
       });
-      if (info.changes === 1) inserted++;
-      else ignored++;
+      if (info.changes === 1) inserted += 1;
+      else ignored += 1;
     }
     return { inserted, ignored };
   });
 
-  while (nextUrl) {
+  const result = (ok, extra = {}) => ({
+    ok,
+    checkpoint: walletSyncState.toPublicState(state),
+    pages,
+    startPage,
+    totalFetched,
+    totalConsidered,
+    totalInserted,
+    totalIgnored,
+    ...extra,
+  });
+
+  while (pages < 500) {
     pages += 1;
+    const page = state.next_page;
+    const pageUrl =
+      trustedBaseUrl + "/api/stores/" + encodeURIComponent(cfg.storeId) +
+      "/wallet/all?page=" + page + "&wallet=" + encodeURIComponent(walletName);
 
-    const resp = await fetch(nextUrl, {
-      headers: {
-        Authorization: `Bearer ${cfg.token}`,
-        Accept: "application/json",
-      },
-    });
-
-    if (!resp.ok) {
-      const txt = await resp.text().catch(() => "");
-      return { ok: false, error: `Fetch failed (${resp.status}): ${txt.slice(0, 240)}` };
-    }
-
-    const json = await resp.json();
-    const wallet = json?.data?.wallet;
-    const items = wallet?.data || [];
-
-    if (!Array.isArray(items) || items.length === 0) break;
-
-    const res = insertMany(items);
-    totalFetched += items.length;
-    totalInserted += res.inserted;
-    totalIgnored += res.ignored;
-
-    if (wallet?.next_page_url) {
-      const u = new URL(wallet.next_page_url, trustedBaseUrl);
-      if (u.origin !== trustedOrigin) {
-        return { ok: false, error: "Rejected wallet pagination URL from an untrusted origin" };
+    let wallet;
+    try {
+      const response = await fetch(pageUrl, {
+        headers: {
+          Authorization: "Bearer " + cfg.token,
+          Accept: "application/json",
+        },
+      });
+      if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        throw new Error("Fetch failed (" + response.status + "): " + text.slice(0, 240));
       }
-      u.searchParams.set("wallet", cfg.wallet || "main");
-      nextUrl = u.toString();
-    } else {
-      nextUrl = null;
+      const json = await response.json();
+      wallet = json?.data?.wallet;
+    } catch (error) {
+      state = walletSyncState.markFailed(cfg.storeId, walletName, error);
+      return result(false, { error: state.last_error });
     }
 
-    if (pages > 500) break;
+    const items = Array.isArray(wallet?.data) ? wallet.data : [];
+    totalFetched += items.length;
+    const watermarkIndex = state.last_synced_head_id == null
+      ? -1
+      : items.findIndex((item) => String(item?.id) === state.last_synced_head_id);
+    const newItems = watermarkIndex >= 0 ? items.slice(0, watermarkIndex) : items;
+
+    if (!state.cycle_head_id && newItems[0]?.id != null) {
+      state = walletSyncState.setCycleHead(cfg.storeId, walletName, newItems[0].id);
+    }
+
+    try {
+      const inserted = insertMany(newItems);
+      totalConsidered += newItems.length;
+      totalInserted += inserted.inserted;
+      totalIgnored += inserted.ignored;
+    } catch (error) {
+      state = walletSyncState.markFailed(cfg.storeId, walletName, error);
+      return result(false, { error: state.last_error });
+    }
+
+    if (watermarkIndex >= 0) {
+      state = walletSyncState.markCompleted(cfg.storeId, walletName, page);
+      return result(true, { stoppedAtWatermark: true });
+    }
+
+    if (!wallet?.next_page_url) {
+      state = walletSyncState.markCompleted(cfg.storeId, walletName, page);
+      return result(true, { stoppedAtWatermark: false });
+    }
+
+    try {
+      const nextUrl = new URL(wallet.next_page_url, trustedBaseUrl);
+      if (nextUrl.origin !== trustedOrigin) {
+        throw new Error("Rejected wallet pagination URL from an untrusted origin");
+      }
+    } catch (error) {
+      state = walletSyncState.markFailed(cfg.storeId, walletName, error);
+      return result(false, { error: state.last_error });
+    }
+
+    state = walletSyncState.advanceToPage(cfg.storeId, walletName, page + 1);
   }
 
-  return { ok: true, pages, totalFetched, totalInserted, totalIgnored };
+  state = walletSyncState.markFailed(
+    cfg.storeId,
+    walletName,
+    "Wallet sync stopped after the 500-page safety limit"
+  );
+  return result(false, { error: state.last_error });
 }
 
 function parseWalletSummaryEntry(storeData, walletName) {

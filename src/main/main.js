@@ -13,10 +13,13 @@ const suppliersDb = require("../db/suppliers");
 const billExport = require("../db/billExport");
 const transactionsDb = require("../db/transactions");
 const companyExpensesDb = require("../db/companyExpenses");
+const orderSyncState = require("../db/orderSyncState");
+const walletSyncState = require("../db/walletSyncState");
 
 const logger = require("../utils/logger");
 
 const { syncOrders, loadDetailsByCode } = require("../services/orderService");
+const { runCheckpointedOrderSync } = require("../services/salesOrderSync");
 const { setAuthToken, setBaseUrl } = require("../services/totersApi");
 
 function buildAppMenu(win) {
@@ -764,7 +767,35 @@ ipcMain.handle("products:importExcel", async () => {
 
 ipcMain.handle("wallet:getConfig", () => walletDb.getWalletConfig());
 ipcMain.handle("wallet:saveConfig", (_evt, cfg) => walletDb.saveWalletConfig(cfg));
-ipcMain.handle("wallet:sync", () => walletDb.syncWallet());
+let walletSyncRunning = false;
+ipcMain.handle("wallet:sync", async () => {
+  if (walletSyncRunning) return { ok: false, error: "Wallet sync is already running" };
+  walletSyncRunning = true;
+  try {
+    return await walletDb.syncWallet();
+  } finally {
+    walletSyncRunning = false;
+  }
+});
+ipcMain.handle("wallet:getSyncStatus", () => {
+  const cfg = walletDb.getWalletConfig();
+  if (!cfg?.storeId) return { ok: false, error: "Missing wallet store ID" };
+  const walletName = cfg.wallet || "main";
+  return {
+    ok: true,
+    checkpoint: walletSyncState.toPublicState(walletSyncState.get(cfg.storeId, walletName)),
+  };
+});
+ipcMain.handle("wallet:resetSync", () => {
+  const cfg = walletDb.getWalletConfig();
+  if (!cfg?.storeId) return { ok: false, error: "Missing wallet store ID" };
+  if (walletSyncRunning) return { ok: false, error: "Cannot reset while wallet sync is running" };
+  const walletName = cfg.wallet || "main";
+  return {
+    ok: true,
+    checkpoint: walletSyncState.toPublicState(walletSyncState.reset(cfg.storeId, walletName)),
+  };
+});
 ipcMain.handle("wallet:getRemainingBalance", () => walletDb.fetchRemainingBalanceFromToters());
 
 ipcMain.handle("products:import", (_evt, rows) => productsDb.importProducts(rows));
@@ -840,86 +871,48 @@ ipcMain.handle("sales:profitMarginAnalysis", (_evt, opts) => {
   return salesDb.getProfitMarginAnalysis(opts || {});
 });
 
+let salesOrderSyncRunning = false;
+
 ipcMain.handle("sales:syncFromOrders", async () => {
   const cfg = walletDb.getWalletConfig();
   if (!cfg?.token || !cfg?.storeId) {
     return { ok: false, error: "Missing wallet config (baseUrl / storeId / token)" };
   }
 
+  if (salesOrderSyncRunning) {
+    return { ok: false, error: "Order sync is already running" };
+  }
+
   setBaseUrl(cfg.baseUrl);
   setAuthToken(cfg.token);
 
-  const list = await syncOrders(cfg.storeId);
-
-  // Remove duplicates by order code
-  const uniqueOrders = [];
-  const seen = new Set();
-  for (const o of list || []) {
-    if (!o?.code || !o?.id) continue;
-    if (!seen.has(o.code)) {
-      seen.add(o.code);
-      uniqueOrders.push(o);
+  salesOrderSyncRunning = true;
+  try {
+    const result = await runCheckpointedOrderSync(cfg.storeId);
+    if (!result.ok) {
+      logger.error("Order sync paused at checkpoint", {
+        page: result.checkpoint?.next_page,
+        order_code: result.checkpoint?.failed_order_code,
+        error: result.error,
+      });
     }
+    return result;
+  } finally {
+    salesOrderSyncRunning = false;
   }
+});
 
-  const skippedInvalidSummaries = Math.max(0, (list || []).length - uniqueOrders.length);
+ipcMain.handle("sales:getOrderSyncStatus", () => {
+  const cfg = walletDb.getWalletConfig();
+  if (!cfg?.storeId) return { ok: false, error: "Missing wallet store ID" };
+  return { ok: true, checkpoint: orderSyncState.toPublicState(orderSyncState.get(cfg.storeId)) };
+});
 
-  let processed = 0;
-  let detailsLoaded = 0;
-  let detailsMissing = 0;
-  let detailsFailed = 0;
-  let ordersWithMatchedItems = 0;
-  let ordersWithoutMatchedItems = 0;
-  let totalOrderItems = 0;
-  let matchedOrderItems = 0;
-  let skippedNoBarcodeItems = 0;
-  let skippedUnmatchedProductItems = 0;
-
-  for (const o of uniqueOrders) {
-    try {
-      const detailed = await loadDetailsByCode(o.code);
-      const sync = detailed?._salesSync || null;
-      processed += 1;
-
-      if (detailed) {
-        detailsLoaded += 1;
-      } else {
-        detailsMissing += 1;
-      }
-
-      if (sync) {
-        totalOrderItems += Number(sync.total_items || 0);
-        matchedOrderItems += Number(sync.matched_items || 0);
-        skippedNoBarcodeItems += Number(sync.skipped_no_barcode || 0);
-        skippedUnmatchedProductItems += Number(sync.skipped_unmatched_product || 0);
-
-        if (Number(sync.inserted_rows || 0) > 0) {
-          ordersWithMatchedItems += 1;
-        } else {
-          ordersWithoutMatchedItems += 1;
-        }
-      }
-    } catch (e) {
-      detailsFailed += 1;
-      logger.error("Failed to sync order to sales", { code: o.code, error: String(e) });
-    }
-  }
-
-  return {
-    ok: true,
-    fetched: uniqueOrders.length,
-    skippedInvalidSummaries,
-    processed,
-    detailsLoaded,
-    detailsMissing,
-    detailsFailed,
-    ordersWithMatchedItems,
-    ordersWithoutMatchedItems,
-    totalOrderItems,
-    matchedOrderItems,
-    skippedNoBarcodeItems,
-    skippedUnmatchedProductItems,
-  };
+ipcMain.handle("sales:resetOrderSync", () => {
+  const cfg = walletDb.getWalletConfig();
+  if (!cfg?.storeId) return { ok: false, error: "Missing wallet store ID" };
+  if (salesOrderSyncRunning) return { ok: false, error: "Cannot reset while order sync is running" };
+  return { ok: true, checkpoint: orderSyncState.toPublicState(orderSyncState.reset(cfg.storeId)) };
 });
 
 ipcMain.handle("sales:exportExcel", async (_evt, opts) => {

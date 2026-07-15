@@ -418,6 +418,8 @@ th.sortable:hover { background: #f0f0f0; }
       <label>Wallet:</label>
       <button class="menu-btn" id="btnWalletSettings">Settings</button>
       <button class="menu-btn primary" id="btnWalletSync">Sync</button>
+      <button class="menu-btn" id="btnResetWalletSync" title="Reset the saved wallet-sync checkpoint">Reset Sync</button>
+      <span id="walletSyncStatus" class="muted" style="margin:0;font-size:11px;"></span>
     </div>
 
     <div class="menu-separator"></div>
@@ -430,6 +432,8 @@ th.sortable:hover { background: #f0f0f0; }
       <button class="menu-btn" id="btnGenerateSales">Report</button>
       <button class="menu-btn" id="btnExportSalesExcel">Export Excel</button>
       <button class="menu-btn" id="btnSyncSales">Sync Orders</button>
+      <button class="menu-btn" id="btnResetOrderSync" title="Reset the saved order-sync checkpoint">Reset Sync</button>
+      <span id="orderSyncStatus" class="muted" style="margin:0;font-size:11px;"></span>
     </div>
 
     <div class="menu-separator"></div>
@@ -478,7 +482,6 @@ th.sortable:hover { background: #f0f0f0; }
         <option value="LBP">LBP</option>
       </select>
       <button class="menu-btn" id="btnColumns">Columns</button>
-      <button class="menu-btn danger" id="btnResetSupplier">Reset Costs</button>
     </div>
   </div>
 
