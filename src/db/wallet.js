@@ -3,7 +3,7 @@ const path = require("path");
 const Database = require("better-sqlite3");
 const { getDb, getDbPath, replaceDatabaseFromFile } = require("./database");
 
-const BACKUP_SCHEMA_VERSION = 3;
+const BACKUP_SCHEMA_VERSION = 4;
 
 function extractOrderCode(reason) {
   if (!reason) return null;
@@ -399,6 +399,7 @@ function clearAllData() {
     DELETE FROM transactions;
     DELETE FROM products;
     DELETE FROM suppliers;
+    DELETE FROM company_expenses;
     DELETE FROM config;
     PRAGMA foreign_keys = ON;
   `);
@@ -417,6 +418,9 @@ function importBackupData(data, { replace = false } = {}) {
   const sales = Array.isArray(data.sales) ? data.sales : [];
   const priceHistory = Array.isArray(data.product_price_history)
     ? data.product_price_history
+    : [];
+  const companyExpenses = Array.isArray(data.company_expenses)
+    ? data.company_expenses
     : [];
   const walletConfig = data.walletConfig || null;
   const configRows = Array.isArray(data.config) ? data.config : [];
@@ -521,6 +525,25 @@ function importBackupData(data, { replace = false } = {}) {
       unit_price_usd = excluded.unit_price_usd,
       cost_usd = excluded.cost_usd,
       effective_at = excluded.effective_at
+  `);
+
+  const insertCompanyExpense = db.prepare(`
+    INSERT INTO company_expenses (
+      id, category, description, amount_lbp, expense_date,
+      notes, created_at, updated_at
+    )
+    VALUES (
+      @id, @category, @description, @amount_lbp, @expense_date,
+      @notes, @created_at, @updated_at
+    )
+    ON CONFLICT(id) DO UPDATE SET
+      category = excluded.category,
+      description = excluded.description,
+      amount_lbp = excluded.amount_lbp,
+      expense_date = excluded.expense_date,
+      notes = excluded.notes,
+      created_at = excluded.created_at,
+      updated_at = excluded.updated_at
   `);
 
   const insertConfig = db.prepare(`
@@ -629,6 +652,19 @@ function importBackupData(data, { replace = false } = {}) {
       });
     }
 
+    for (const expense of companyExpenses) {
+      insertCompanyExpense.run({
+        id: expense.id,
+        category: expense.category,
+        description: expense.description || "",
+        amount_lbp: Math.trunc(expense.amount_lbp || 0),
+        expense_date: expense.expense_date,
+        notes: expense.notes || "",
+        created_at: expense.created_at || new Date().toISOString(),
+        updated_at: expense.updated_at || expense.created_at || new Date().toISOString(),
+      });
+    }
+
     if (configRows.length) {
       for (const c of configRows) {
         insertConfig.run({ key: c.key, value: c.value });
@@ -648,6 +684,7 @@ function importBackupData(data, { replace = false } = {}) {
     imported_products: products.length,
     imported_sales: sales.length,
     imported_price_history: priceHistory.length,
+    imported_company_expenses: companyExpenses.length,
     replaced: !!replace,
   };
 }

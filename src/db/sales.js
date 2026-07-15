@@ -80,9 +80,6 @@ function recordOrderItemsToSales(order) {
     };
   }
 
-  // Keep sync idempotent: re-syncing the same order should overwrite prior sales rows.
-  db.prepare("DELETE FROM sales WHERE order_code = ?").run(order.code);
-
   // Get currency conversion rate
   const cfg = getWalletConfig();
   const usdToLbpRate = cfg?.usdToLbpRate || 90000;
@@ -137,6 +134,21 @@ function recordOrderItemsToSales(order) {
     (sum, it) => sum + Number(it.quantity || 0) * Number(it.priceUsd || 0),
     0
   );
+
+  if (Object.keys(aggregatedItems).length === 0) {
+    return {
+      order_code: order?.code || null,
+      total_items: items.length,
+      matched_items: matchedItems,
+      inserted_rows: 0,
+      skipped_no_barcode: skippedNoBarcode,
+      skipped_unmatched_product: skippedUnmatchedProduct,
+      preserved_existing: true,
+    };
+  }
+
+  // Keep sync idempotent only after at least one product is ready to replace prior rows.
+  db.prepare("DELETE FROM sales WHERE order_code = ?").run(order.code);
 
   // Simple insert - let duplicates exist for now
   const insertStmt = db.prepare(
