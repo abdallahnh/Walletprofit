@@ -248,6 +248,9 @@ test("Products page uses the central catalog and remains usable as mobile cards"
   assert.match(html, /@media\(max-width:720px\)/);
   assert.match(html, /td:before\{content:attr\(data-label\)/);
   assert.match(html, /No image/);
+  assert.match(html, /Image URLs/);
+  assert.match(html, /synced_order_image_url/);
+  assert.match(html, /target="_blank"/);
 });
 
 test("Merchant mapping attaches to an existing supplier instead of creating a duplicate", () => {

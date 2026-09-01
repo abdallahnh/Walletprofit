@@ -1005,14 +1005,22 @@ ipcMain.handle("wallet:getRemainingBalance", () => walletDb.fetchRemainingBalanc
 ipcMain.handle("products:import", (_evt, rows) => productsDb.importProducts(rows));
 ipcMain.handle("products:get", () => productsDb.getProducts());
 ipcMain.handle("products:update", (_evt, barcode, updates) => productsDb.updateProduct(barcode, updates));
+function attachSyncedOrderImages(products) {
+  const images = orderItemsDb.getLatestSyncedImagesByBarcode();
+  return (products || []).map((product) => ({
+    ...product,
+    synced_order_image_url: images.get(String(product.barcode || "")) || null,
+  }));
+}
+
 ipcMain.handle("catalog:getProducts", async (_evt, opts) => {
   try {
     const products = await productCatalog.getProducts(opts || {});
-    return { ok: true, products, source: "supabase" };
+    return { ok: true, products: attachSyncedOrderImages(products), source: "supabase" };
   } catch (error) {
     return {
       ok: true,
-      products: productCatalog.getCachedProducts(opts || {}),
+      products: attachSyncedOrderImages(productCatalog.getCachedProducts(opts || {})),
       source: "cache",
       warning: String(error.message || error),
     };

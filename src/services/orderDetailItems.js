@@ -22,6 +22,40 @@ function mapDetailLine(detail) {
   };
 }
 
+function extractOrderItemImageUrl(detail) {
+  const item = detail?.item || {};
+  const candidates = [
+    item.image,
+    item.image_url,
+    item.thumbnail,
+    item.imgs,
+    item.images,
+    detail?.image,
+    detail?.image_url,
+  ];
+
+  function findUrl(value) {
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        const found = findUrl(entry);
+        if (found) return found;
+      }
+      return null;
+    }
+    if (value && typeof value === "object") {
+      return findUrl(value.url ?? value.src ?? value.image_url ?? value.image ?? value.thumbnail);
+    }
+    try {
+      const parsed = new URL(String(value || "").trim());
+      return ["http:", "https:"].includes(parsed.protocol) ? parsed.toString() : null;
+    } catch {
+      return null;
+    }
+  }
+
+  return findUrl(candidates);
+}
+
 function normalizeOrderDetailItems(orderDetail) {
   if (!orderDetail) return [];
 
@@ -50,4 +84,5 @@ module.exports = {
   normalizeOrderDetailItems,
   mapDetailLine,
   countAdjustedItems,
+  extractOrderItemImageUrl,
 };

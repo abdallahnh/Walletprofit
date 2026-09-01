@@ -700,6 +700,20 @@
     return (await cacheGetKey(CATALOG_CACHE_KEY).catch(() => null)) || [];
   }
 
+  function attachSyncedOrderImages(products) {
+    const images = new Map();
+    for (const item of [...(data.order_items || [])].reverse()) {
+      const barcode = String(item.barcode || "");
+      if (barcode && item.image_url_snapshot && !images.has(barcode)) {
+        images.set(barcode, item.image_url_snapshot);
+      }
+    }
+    return (products || []).map((product) => ({
+      ...product,
+      synced_order_image_url: images.get(String(product.barcode || "")) || null,
+    }));
+  }
+
   async function catalogGetProducts(options) {
     const opts = options || {};
     const filters = [`select=${encodeURIComponent(CATALOG_SELECT)}`, "order=item_name.asc"];
@@ -712,11 +726,11 @@
     try {
       const products = await supabaseRequest(`/rest/v1/products?${filters.join("&")}`);
       await cachePut(CATALOG_CACHE_KEY, products || []);
-      return { ok: true, products: products || [], source: "supabase" };
+      return { ok: true, products: attachSyncedOrderImages(products), source: "supabase" };
     } catch (error) {
       return {
         ok: true,
-        products: await catalogCachedProducts(),
+        products: attachSyncedOrderImages(await catalogCachedProducts()),
         source: "cache",
         warning: String(error.message || error),
       };

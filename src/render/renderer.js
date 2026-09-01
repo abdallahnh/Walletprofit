@@ -612,10 +612,15 @@ function itemImageHtml(url) {
   try {
     const parsed = new URL(String(url || ""));
     if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error("Invalid protocol");
-    return `<img class="order-item-thumb" src="${escapeHtml(parsed.toString())}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.replaceWith(document.createTextNode('No image'))">`;
+    const safeUrl = escapeHtml(parsed.toString());
+    return `<a class="order-item-image-link" href="${safeUrl}" target="_blank" rel="noopener noreferrer" title="Open image"><img class="order-item-thumb" src="${safeUrl}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.parentElement.replaceWith(document.createTextNode('No image'))"></a>`;
   } catch {
     return '<span class="order-item-placeholder">No image</span>';
   }
+}
+
+function itemNameHtml(orderCode, item) {
+  return `<button type="button" class="item-order-link" data-open-item-order="${escapeHtml(orderCode)}" title="Load live Toters order details">${escapeHtml(item.item_name || item.barcode)}</button>`;
 }
 
 function catalogStatusLabel(item) {
@@ -653,7 +658,7 @@ function renderItemSubRow(orderCode, orderItems, lines, isSplit) {
         return `
     <tr data-barcode="${escapeHtml(item.barcode)}">
       <td>${itemImageHtml(item.image_url)}</td>
-      <td>${escapeHtml(item.item_name || item.barcode)}</td>
+      <td>${itemNameHtml(orderCode, item)}</td>
       <td>${escapeHtml(item.barcode || "")}</td>
       <td class="num">${Number(item.quantity || 0)}</td>
       <td class="num">${vendorPrice}</td>
@@ -677,7 +682,7 @@ function renderItemSubRow(orderCode, orderItems, lines, isSplit) {
       return `
     <tr data-barcode="${escapeHtml(item.barcode)}">
       <td>${itemImageHtml(item.image_url)}</td>
-      <td>${escapeHtml(item.item_name || item.barcode)}</td>
+      <td>${itemNameHtml(orderCode, item)}</td>
       <td>${escapeHtml(item.barcode || "")}</td>
       <td class="num">${Number(item.quantity || 0)}</td>
       <td class="num">${vendorPrice}</td>
@@ -857,6 +862,16 @@ function renderRows(rows) {
   tbody.querySelectorAll(".inp-line-paid").forEach((inp) => {
     inp.addEventListener("change", async () => {
       await saveLineMeta(inp.getAttribute("data-order"), inp.getAttribute("data-barcode"));
+    });
+  });
+
+  tbody.querySelectorAll(".item-order-link").forEach((btn) => {
+    btn.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const code = btn.getAttribute("data-open-item-order");
+      selectRow(code);
+      await window.api.openOrder(code);
+      await refresh();
     });
   });
 

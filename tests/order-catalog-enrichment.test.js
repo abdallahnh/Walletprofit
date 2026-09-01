@@ -40,7 +40,11 @@ function order(code, items) {
     order_detail: items.map((item) => ({
       quantity: item.quantity,
       item_price: Number(item.price_usd || 10) * 90000,
-      item: { barcode: item.barcode, item_name: item.item_name || "Toters item" },
+      item: {
+        barcode: item.barcode,
+        item_name: item.item_name || "Toters item",
+        ...(item.image_url ? { image: item.image_url } : {}),
+      },
     })),
   };
 }
@@ -78,6 +82,32 @@ test("Merchant T maps the item snapshot to the existing Ahmad supplier", () => {
     { barcode: "619659052775", quantity: 1 },
   ]));
   assert.equal(orderLineMeta.getOrderLineTotals("40600-47009").supplier_name, "Ahmad");
+});
+
+test("Toters order-detail images override catalog images without changing cost snapshots", () => {
+  const db = setup();
+  salesDb.recordOrderItemsToSales(order("40600-47018", [
+    { barcode: "619659052775", quantity: 1, image_url: "https://cdn.toters.example/first.jpg" },
+  ]));
+  let item = orderItemsDb.getOrderItems("40600-47018")[0];
+  assert.equal(item.image_url_snapshot, "https://cdn.toters.example/first.jpg");
+  assert.equal(item.unit_supplier_cost_usd, 5);
+
+  catalogCache.replaceCatalog([product({ vendor_price_usd: 6 })], mappings);
+  salesDb.recordOrderItemsToSales(order("40600-47018", [
+    { barcode: "619659052775", quantity: 1, image_url: "https://cdn.toters.example/latest.jpg" },
+  ]));
+  item = orderItemsDb.getOrderItems("40600-47018")[0];
+  const sale = db.prepare("SELECT cost, image_url_snapshot FROM sales WHERE order_code=?")
+    .get("40600-47018");
+  assert.equal(item.image_url_snapshot, "https://cdn.toters.example/latest.jpg");
+  assert.equal(item.unit_supplier_cost_usd, 5);
+  assert.equal(sale.cost, 5);
+  assert.equal(sale.image_url_snapshot, "https://cdn.toters.example/latest.jpg");
+  assert.equal(
+    orderItemsDb.getLatestSyncedImagesByBarcode().get("619659052775"),
+    "https://cdn.toters.example/latest.jpg"
+  );
 });
 
 test("catalog price changes affect new sales but never rewrite an existing sale snapshot", () => {

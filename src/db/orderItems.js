@@ -2,7 +2,10 @@ const { getDb } = require("./database");
 const catalogCache = require("./productCatalogCache");
 const { getSupplierByCatalogKey } = require("./suppliers");
 const { getWalletConfig } = require("./wallet");
-const { normalizeOrderDetailItems } = require("../services/orderDetailItems");
+const {
+  normalizeOrderDetailItems,
+  extractOrderItemImageUrl,
+} = require("../services/orderDetailItems");
 
 const UPSERT_SQL = [
   "INSERT INTO order_items (order_code,line_key,barcode,item_name_snapshot,quantity,",
@@ -42,6 +45,7 @@ function aggregateOrderDetails(order) {
       const row = grouped.get(lineKey);
       row.quantity += quantity;
       if (unitPriceUsd > 0) row.unit_selling_price_usd = unitPriceUsd;
+      if (!row.image_url_snapshot) row.image_url_snapshot = extractOrderItemImageUrl(detail);
       row.total_selling_price_usd = row.quantity * row.unit_selling_price_usd;
       return;
     }
@@ -53,6 +57,7 @@ function aggregateOrderDetails(order) {
       quantity,
       unit_selling_price_usd: unitPriceUsd,
       total_selling_price_usd: quantity * unitPriceUsd,
+      image_url_snapshot: extractOrderItemImageUrl(detail),
       order_created_at: order.created_at || new Date().toISOString(),
     });
   });
@@ -60,8 +65,10 @@ function aggregateOrderDetails(order) {
 }
 
 function enrichLine(base, existing = null, { allowCostSnapshot = true } = {}) {
+  const syncedImage = base.image_url_snapshot || existing?.image_url_snapshot || null;
   if (!base.barcode) return {
     ...base,
+    image_url_snapshot: syncedImage,
     catalog_sync_status: "missing_barcode",
     catalog_error: "Order item has no barcode",
     cost_source: existing?.cost_source || null,
@@ -71,6 +78,7 @@ function enrichLine(base, existing = null, { allowCostSnapshot = true } = {}) {
     const refreshed = catalogCache.hasSuccessfulRefresh();
     return {
       ...base,
+      image_url_snapshot: syncedImage,
       catalog_sync_status: refreshed ? "missing_product" : "pending",
       catalog_error: refreshed
         ? "Barcode does not exist in the product catalog"
@@ -96,7 +104,7 @@ function enrichLine(base, existing = null, { allowCostSnapshot = true } = {}) {
     item_name_snapshot: preserve ? existing.item_name_snapshot :
       product.item_name || base.item_name_snapshot,
     catalog_product_id: product.id,
-    image_url_snapshot: preserve ? existing.image_url_snapshot : product.image_url || null,
+    image_url_snapshot: syncedImage || product.image_url || null,
     supplier_id: supplier?.id || existing?.supplier_id || null,
     supplier_key: preserve ? existing.supplier_key : product.supplier_key || null,
     merchant_code: preserve ? existing.merchant_code : product.merchant_code || null,
@@ -153,6 +161,21 @@ function getOrderItemsMap() {
     map.get(row.order_code).push(row);
   }
   return map;
+}
+
+function getLatestSyncedImagesByBarcode() {
+  const rows = getDb().prepare(`
+    SELECT barcode, image_url_snapshot
+    FROM order_items
+    WHERE barcode IS NOT NULL AND TRIM(barcode) <> ''
+      AND image_url_snapshot IS NOT NULL AND TRIM(image_url_snapshot) <> ''
+    ORDER BY datetime(updated_at) DESC, id DESC
+  `).all();
+  const images = new Map();
+  for (const row of rows) {
+    if (!images.has(row.barcode)) images.set(row.barcode, row.image_url_snapshot);
+  }
+  return images;
 }
 
 function retryPendingItems({ recentWindowDays = 7 } = {}) {
@@ -267,5 +290,6 @@ function backfillMissingProductData({ applyCurrentVendorPrice = false } = {}) {
 
 module.exports = {
   aggregateOrderDetails, enrichLine, getOrderItems, getOrderItemsMap,
+  getLatestSyncedImagesByBarcode,
   backfillMissingProductData, getBackfillPreview, processOrderItems, retryPendingItems,
 };
