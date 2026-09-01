@@ -76,3 +76,27 @@ safety backup is created automatically before every cloud download.
 
 Never put the Supabase database password or service-role key in the application. The bundled
 publishable key is used only with authenticated sessions and Row Level Security.
+
+## 11) Central product catalog migration
+
+The normalized Supabase product catalog is separate from the revisioned SQLite cloud snapshot.
+Historical sales and supplier costs remain in SQLite and are never recalculated from today's
+catalog prices.
+
+One-time setup:
+
+1. Run `supabase/migrations/20260901_product_catalog.sql` in Supabase SQL Editor after the existing
+   cloud migration.
+2. Review `docs/google-sheet-product-mapping.md`, especially the reported duplicate and invalid
+   Sheet rows.
+3. Validate the current Google Sheet without writing to Supabase:
+
+   `npm run catalog:import -- --dry-run`
+
+4. For the one-time live import, provide credentials through the shell environment and run:
+
+   `SUPABASE_URL=... SUPABASE_KEY=... SUPABASE_EMAIL=... SUPABASE_PASSWORD=... npm run catalog:import`
+
+Use the project's publishable key and an approved Supabase Auth account—not the database password.
+A temporary access token or service-role key may be used by an administrator, but it must remain
+only in the shell environment and must never be committed or bundled into the app.

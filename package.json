@@ -8,6 +8,7 @@
     "start": "electron .",
     "dev": "electron .",
     "test": "node scripts/run-tests.js",
+    "catalog:import": "node scripts/import-google-sheet-products.js",
     "build": "electron-builder",
     "build:win": "electron-builder --win nsis --x64 --publish never",
     "build:mac": "electron-builder --mac dmg",
