@@ -59,6 +59,22 @@ test("mobile supplier summary includes distinct products and units sold", () => 
   ]);
 });
 
+test("mobile supplier details separate marked-paid and known outstanding snapshot costs", () => {
+  const paid = Core.getSupplierDetails(fixture(), 1);
+  assert.equal(paid.summary.products_sold, 1);
+  assert.equal(paid.summary.units_sold, 1);
+  assert.equal(paid.summary.total_cost_usd, 4);
+  assert.equal(paid.summary.paid_amount_usd, 4);
+  assert.equal(paid.summary.outstanding_usd, 0);
+  assert.equal(paid.orders[0].supplier_paid, 1);
+
+  const outstanding = Core.getSupplierDetails(fixture(), 2);
+  assert.equal(outstanding.summary.total_cost_usd, 7);
+  assert.equal(outstanding.summary.paid_amount_usd, 0);
+  assert.equal(outstanding.summary.outstanding_usd, 7);
+  assert.equal(outstanding.orders[0].supplier_paid, 0);
+});
+
 test("mobile core creates one bill per supplier", () => {
   const bills = Core.buildBillDataList(fixture(), "100-200");
   assert.deepEqual(

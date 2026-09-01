@@ -55,6 +55,31 @@ th { position: sticky; top: 0; background: #fafafa; }
   border: 1px solid #ccc;
   vertical-align: middle;
 }
+.detail-panel { margin-top: 16px; border: 1px solid #ddd; border-radius: 12px; padding: 14px; }
+.detail-panel[hidden] { display: none; }
+.detail-header { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.detail-header h2 { margin: 0; font-size: 17px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); gap: 8px; margin: 14px 0; }
+.stat { border: 1px solid #e6e6e6; border-radius: 10px; padding: 10px; background: #fafafa; }
+.stat-label { color: #666; font-size: 11px; }
+.stat-value { margin-top: 3px; font-size: 17px; font-weight: 700; }
+.detail-section { margin-top: 16px; }
+.detail-section h3 { font-size: 14px; margin: 0 0 8px; }
+.detail-table-wrap { overflow: auto; border: 1px solid #eee; border-radius: 10px; }
+.thumb { width: 54px; height: 54px; object-fit: contain; border-radius: 8px; background: #f3f4f6; }
+.thumb-placeholder { display: grid; place-items: center; color: #777; font-size: 10px; }
+.warning { color: #a15c00; font-weight: 600; }
+.paid { color: #08783e; font-weight: 600; }
+@media (max-width: 640px) {
+  body { margin: 10px; }
+  .wrap { max-height: none; }
+  .detail-panel { padding: 10px; }
+  .mobile-card-table thead { display: none; }
+  .mobile-card-table, .mobile-card-table tbody, .mobile-card-table tr, .mobile-card-table td { display: block; width: 100%; }
+  .mobile-card-table tr { border-bottom: 1px solid #ddd; padding: 8px 0; }
+  .mobile-card-table td { border: 0; padding: 4px 8px; }
+  .mobile-card-table td::before { content: attr(data-mobile-label); display: inline-block; min-width: 110px; color: #666; font-size: 11px; }
+}
 </style>
 </head>
 <body>
@@ -80,12 +105,41 @@ th { position: sticky; top: 0; background: #fafafa; }
           <th>Name</th>
           <th>Phone</th>
           <th>Created</th>
-          <th style="width: 140px;">Actions</th>
+          <th style="width: 220px;">Actions</th>
         </tr>
       </thead>
       <tbody id="tbody"></tbody>
     </table>
   </div>
+
+  <section id="detailPanel" class="detail-panel" hidden>
+    <div class="detail-header">
+      <div>
+        <h2 id="detailTitle">Supplier details</h2>
+        <div id="detailSubtitle" class="muted"></div>
+      </div>
+      <button class="secondary" id="btnCloseDetails">Close</button>
+    </div>
+    <div id="detailStats" class="stats"></div>
+    <div class="detail-section">
+      <h3>Products</h3>
+      <div class="detail-table-wrap">
+        <table class="mobile-card-table">
+          <thead><tr><th>Image</th><th>Product</th><th>Barcode</th><th>Units</th><th>Orders</th><th>Current Vendor</th><th>Snapshot Cost</th><th>Status</th></tr></thead>
+          <tbody id="detailProducts"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="detail-section">
+      <h3>Orders</h3>
+      <div class="detail-table-wrap">
+        <table class="mobile-card-table">
+          <thead><tr><th>Order</th><th>Date</th><th>Products</th><th>Units</th><th>Supplier Cost</th><th>Payment</th><th>Profit</th></tr></thead>
+          <tbody id="detailOrders"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
 
   <script>
     const tbody = document.getElementById("tbody");
@@ -106,6 +160,73 @@ th { position: sticky; top: 0; background: #fafafa; }
         .replace(/"/g, "&quot;");
     }
 
+    function money(value) {
+      return value == null ? "Missing cost" : `$${Number(value).toFixed(2)}`;
+    }
+
+    function imageCell(url, name) {
+      if (!url) return '<span class="thumb thumb-placeholder">No image</span>';
+      return `<img class="thumb" src="${escapeHtml(url)}" alt="${escapeHtml(name)}" data-product-image />`;
+    }
+
+    function stat(label, value, warning = false) {
+      return `<div class="stat"><div class="stat-label">${escapeHtml(label)}</div><div class="stat-value${warning ? " warning" : ""}">${escapeHtml(value)}</div></div>`;
+    }
+
+    async function showDetails(id) {
+      setErr("");
+      const result = await window.api.suppliersGetDetails(id);
+      if (result?.ok === false) throw new Error(result.error || "Could not load supplier details");
+      const supplier = result.supplier;
+      const summary = result.summary || {};
+      document.getElementById("detailTitle").textContent = supplier.name;
+      document.getElementById("detailSubtitle").textContent = "Costs below use the historical sale snapshots. Current catalog prices never rewrite old sales.";
+      document.getElementById("detailStats").innerHTML = [
+        stat("Catalog products", summary.catalog_products || 0),
+        stat("Products sold", summary.products_sold || 0),
+        stat("Units sold", summary.units_sold || 0),
+        stat("Orders", summary.orders || 0),
+        stat(summary.total_cost_usd == null ? "Known supplier cost" : "Supplier cost", money(summary.total_cost_usd == null ? summary.known_cost_usd : summary.total_cost_usd)),
+        stat("Marked paid", money(summary.paid_amount_usd || 0)),
+        stat("Known outstanding", money(summary.outstanding_usd || 0)),
+        stat("Items missing cost", summary.missing_cost_items || 0, Number(summary.missing_cost_items) > 0),
+      ].join("");
+
+      const products = result.products || [];
+      document.getElementById("detailProducts").innerHTML = products.length ? products.map((p) => `
+        <tr>
+          <td data-mobile-label="Image">${imageCell(p.image_url, p.item_name)}</td>
+          <td data-mobile-label="Product">${escapeHtml(p.item_name || "Unknown product")}</td>
+          <td data-mobile-label="Barcode">${escapeHtml(p.barcode || "—")}</td>
+          <td data-mobile-label="Units">${escapeHtml(p.units_sold || 0)}</td>
+          <td data-mobile-label="Orders">${escapeHtml(p.order_count || 0)}</td>
+          <td data-mobile-label="Current vendor">${money(p.current_vendor_price_usd)}</td>
+          <td data-mobile-label="Snapshot cost" class="${p.total_cost_usd == null ? "warning" : ""}">${money(p.total_cost_usd)}</td>
+          <td data-mobile-label="Status">${p.is_archived ? "Archived" : (p.is_available === false ? "Out of stock" : "Active")}</td>
+        </tr>
+      `).join("") : '<tr><td colspan="8">No catalog or sold products are assigned to this supplier.</td></tr>';
+
+      const orders = result.orders || [];
+      document.getElementById("detailOrders").innerHTML = orders.length ? orders.map((o) => `
+        <tr>
+          <td data-mobile-label="Order">${escapeHtml(o.order_code)}</td>
+          <td data-mobile-label="Date">${escapeHtml((o.sale_date || "").slice(0, 10) || "—")}</td>
+          <td data-mobile-label="Products">${escapeHtml(o.product_count || 0)}</td>
+          <td data-mobile-label="Units">${escapeHtml(o.units || 0)}</td>
+          <td data-mobile-label="Supplier cost" class="${o.total_cost_usd == null ? "warning" : ""}">${money(o.total_cost_usd)}</td>
+          <td data-mobile-label="Payment" class="${o.supplier_paid ? "paid" : ""}">${o.supplier_paid ? "Paid" : "Outstanding"}</td>
+          <td data-mobile-label="Profit">${money(o.profit_usd)}</td>
+        </tr>
+      `).join("") : '<tr><td colspan="7">No orders have been assigned to this supplier.</td></tr>';
+
+      document.querySelectorAll("[data-product-image]").forEach((img) => img.addEventListener("error", () => {
+        img.replaceWith(Object.assign(document.createElement("span"), { className: "thumb thumb-placeholder", textContent: "No image" }));
+      }, { once: true }));
+      const panel = document.getElementById("detailPanel");
+      panel.hidden = false;
+      panel.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
     async function load() {
       setErr("");
       const rows = await window.api.suppliersGetAll();
@@ -122,11 +243,19 @@ th { position: sticky; top: 0; background: #fafafa; }
           </td>
           <td>${escapeHtml((s.created_at || "").slice(0, 10))}</td>
           <td>
+            <button class="primary" data-view>View</button>
             <button class="secondary" data-save>Save</button>
             <button class="danger" data-delete>Delete</button>
           </td>
         </tr>
       `).join("");
+
+      tbody.querySelectorAll("[data-view]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const id = Number(btn.closest("tr").getAttribute("data-id"));
+          showDetails(id).catch(setErr);
+        });
+      });
 
       tbody.querySelectorAll("[data-save]").forEach((btn) => {
         btn.addEventListener("click", async () => {
@@ -178,6 +307,9 @@ th { position: sticky; top: 0; background: #fafafa; }
     });
 
     document.getElementById("btnRefresh").addEventListener("click", () => load().catch(setErr));
+    document.getElementById("btnCloseDetails").addEventListener("click", () => {
+      document.getElementById("detailPanel").hidden = true;
+    });
 
     load().catch(setErr);
   </script>

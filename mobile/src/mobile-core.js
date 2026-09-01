@@ -371,6 +371,88 @@
     return [...result.values()].map(row=>({...row,product_count:row._products.size,_products:undefined})).sort((a, b) => a.supplier_name.localeCompare(b.supplier_name));
   }
 
+  function getSupplierDetails(rawData, supplierId) {
+    const data = normalizeData(rawData);
+    const id = Number(supplierId);
+    const supplier = data.suppliers.find((item) => Number(item.id) === id);
+    if (!supplier) return { ok: false, error: "Supplier not found" };
+    const lineMap = new Map(data.order_line_meta.map((line) => [
+      `${line.order_code}\u0000${line.barcode}`, line,
+    ]));
+    const orderMeta = new Map(data.order_meta.map((meta) => [meta.order_code, meta]));
+    const products = new Map();
+    const orders = new Map();
+    let knownCost = 0, paidAmount = 0, outstanding = 0, missingCosts = 0, units = 0;
+    for (const sale of data.sales) {
+      const line = lineMap.get(`${sale.order_code}\u0000${sale.barcode}`);
+      const meta = orderMeta.get(sale.order_code) || {};
+      const effectiveSupplier = Number(line?.supplier_id || sale.supplier_id || meta.supplier_id || 0);
+      if (effectiveSupplier !== id) continue;
+      const productRecord = data.products.find((item) =>
+        Number(item.id) === Number(sale.product_id) || String(item.barcode) === String(sale.barcode)
+      ) || {};
+      const barcode = String(sale.barcode || "");
+      if (!products.has(barcode)) products.set(barcode, {
+        barcode,
+        item_name: sale.item_name_snapshot || productRecord.item_name || barcode,
+        image_url: sale.image_url_snapshot || productRecord.image_url || null,
+        vendor_price_usd: sale.unit_supplier_cost_usd ?? null,
+        units_sold: 0, known_cost_usd: 0, missing_cost_items: 0, order_codes: new Set(),
+      });
+      const product = products.get(barcode);
+      const quantity = Number(sale.quantity || 0);
+      product.units_sold += quantity;
+      product.order_codes.add(sale.order_code);
+      units += quantity;
+      const paid = line ? !!line.supplier_paid : !!meta.supplier_paid;
+      if (sale.cost == null) {
+        missingCosts += 1;
+        product.missing_cost_items += 1;
+      } else {
+        const cost = Number(sale.cost);
+        knownCost += cost;
+        product.known_cost_usd += cost;
+        if (paid) paidAmount += cost;
+        else outstanding += cost;
+      }
+      if (!orders.has(sale.order_code)) orders.set(sale.order_code, {
+        order_code: sale.order_code, created_at: sale.created_at, units: 0,
+        known_cost_usd: 0, revenue_usd: 0, profit_usd: 0,
+        missing_cost_items: 0, all_paid: true, barcodes: new Set(),
+      });
+      const order = orders.get(sale.order_code);
+      order.units += quantity;
+      order.revenue_usd += Number(sale.total_sale || 0);
+      order.barcodes.add(barcode);
+      if (sale.cost == null) {
+        order.missing_cost_items += 1;
+        order.profit_usd = null;
+        order.all_paid = false;
+      } else {
+        order.known_cost_usd += Number(sale.cost);
+        if (order.profit_usd != null) order.profit_usd += Number(sale.profit || 0);
+        if (!paid) order.all_paid = false;
+      }
+    }
+    const productRows = [...products.values()].map((row) => ({
+      ...row, current_vendor_price_usd: row.vendor_price_usd,
+      order_count: row.order_codes.size, order_codes: undefined,
+      total_cost_usd: row.missing_cost_items ? null : row.known_cost_usd,
+    })).sort((a, b) => b.units_sold - a.units_sold);
+    const orderRows = [...orders.values()].map((row) => ({
+      ...row, sale_date: row.created_at,
+      product_count: row.barcodes.size, barcodes: undefined,
+      total_cost_usd: row.missing_cost_items ? null : row.known_cost_usd,
+      supplier_paid: row.all_paid ? 1 : 0,
+    }));
+    return { ok: true, supplier, summary: {
+      catalog_products: productRows.length, products_sold: productRows.length,
+      units_sold: units, orders: orderRows.length, known_cost_usd: knownCost,
+      total_cost_usd: missingCosts ? null : knownCost, paid_amount_usd: paidAmount,
+      outstanding_usd: outstanding, missing_cost_items: missingCosts,
+    }, products: productRows, orders: orderRows };
+  }
+
   function getTransactions(data, opts) {
     let rows = normalizeData(data).transactions.map((row) => ({
       ...row,
@@ -571,6 +653,7 @@
     filterOrders,
     getTotals,
     getSupplierSummary,
+    getSupplierDetails,
     getTransactions,
     getExpenses,
     salesReport,

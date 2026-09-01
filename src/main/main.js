@@ -453,6 +453,9 @@ ipcMain.handle("suppliers:delete", async (_evt, id) => {
 ipcMain.handle("suppliers:getSummary", async (_evt, opts) => {
   return ordersDb.getSupplierSummary(opts || {});
 });
+ipcMain.handle("suppliers:getDetails", async (_evt, id) => {
+  return suppliersDb.getSupplierDetails(id);
+});
 
 ipcMain.handle("open-suppliers", () => {
   const { preloadJs } = resolveRendererPaths();

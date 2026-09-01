@@ -806,6 +806,7 @@
       return { ok: true };
     }),
     suppliersGetSummary: async (opts) => { await ready; return Core.getSupplierSummary(data, opts); },
+    suppliersGetDetails: async (id) => { await ready; return Core.getSupplierDetails(data, id); },
     openSuppliers: () => navigate("suppliers.html"),
     openSettlements: () => navigate("settlements.html"),
     openTransactions: () => navigate("transactions.html"),

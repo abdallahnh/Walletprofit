@@ -11,6 +11,7 @@ const orderItemsDb = require("../src/db/orderItems");
 const orderLineMeta = require("../src/db/orderLineMeta");
 const walletDb = require("../src/db/wallet");
 const ordersDb = require("../src/db/orders");
+const suppliersDb = require("../src/db/suppliers");
 
 const mappings = [
   { merchant_code: "B", supplier_key: "bassam", supplier_name: "Bassam" },
@@ -105,6 +106,7 @@ test("one order allocates supplier costs independently for Bassam and Ahmad", ()
   const db = setup([
     product(),
     product({ id: "product-ahmad", barcode: "AHMAD-7", item_name: "Ahmad item", vendor_price_usd: 7, merchant_code: "T" }),
+    product({ id: "product-bassam-unsold", barcode: "BASSAM-UNSOLD", item_name: "Unsold Bassam item" }),
   ]);
   salesDb.recordOrderItemsToSales(order("40600-47013", [
     { barcode: "619659052775", quantity: 1 },
@@ -127,6 +129,24 @@ test("one order allocates supplier costs independently for Bassam and Ahmad", ()
     { name: "Ahmad", products: 1, units: 1 },
     { name: "Bassam", products: 1, units: 1 },
   ]);
+
+  const bassam = db.prepare("SELECT id FROM suppliers WHERE catalog_supplier_key='bassam'").get();
+  const ahmad = db.prepare("SELECT id FROM suppliers WHERE catalog_supplier_key='ahmad'").get();
+  db.prepare(`
+    UPDATE order_line_meta SET supplier_paid=1
+    WHERE order_code='40600-47013' AND supplier_id=?
+  `).run(bassam.id);
+  const bassamDetails = suppliersDb.getSupplierDetails(bassam.id);
+  assert.equal(bassamDetails.summary.catalog_products, 2);
+  assert.equal(bassamDetails.summary.products_sold, 1);
+  assert.equal(bassamDetails.summary.units_sold, 1);
+  assert.equal(bassamDetails.summary.paid_amount_usd, 5);
+  assert.equal(bassamDetails.summary.outstanding_usd, 0);
+  assert.equal(bassamDetails.orders[0].supplier_paid, 1);
+  const ahmadDetails = suppliersDb.getSupplierDetails(ahmad.id);
+  assert.equal(ahmadDetails.summary.total_cost_usd, 7);
+  assert.equal(ahmadDetails.summary.paid_amount_usd, 0);
+  assert.equal(ahmadDetails.summary.outstanding_usd, 7);
 });
 
 test("missing product and missing Vendor Price stay explicit and never become zero cost", () => {
@@ -156,6 +176,11 @@ test("missing product and missing Vendor Price stay explicit and never become ze
   const period = ordersDb.getWalletRevenueByPeriod({ period: "day" })[0];
   assert.equal(period.profit, null);
   assert.equal(period.missing_cost_orders, 1);
+  const bassam = db.prepare("SELECT id FROM suppliers WHERE catalog_supplier_key='bassam'").get();
+  const details = suppliersDb.getSupplierDetails(bassam.id);
+  assert.equal(details.summary.total_cost_usd, null);
+  assert.equal(details.summary.missing_cost_items, 1);
+  assert.equal(details.products[0].total_cost_usd, null);
 });
 
 test("cloud JSON backup round-trip preserves immutable item and sale snapshots", () => {

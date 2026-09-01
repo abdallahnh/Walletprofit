@@ -176,6 +176,154 @@ function deleteSupplier(id) {
   return { ok: true };
 }
 
+function getSupplierDetails(id) {
+  const db = getDb();
+  const supplier = getSupplierById(Number(id));
+  if (!supplier) return { ok: false, error: "Supplier not found" };
+
+  const sales = db.prepare(`
+    SELECT
+      s.order_code, s.barcode, s.quantity, s.cost, s.total_sale, s.profit,
+      s.created_at, s.unit_supplier_cost_usd, s.cost_source,
+      COALESCE(s.item_name_snapshot, oi.item_name_snapshot, s.barcode) AS item_name,
+      COALESCE(s.image_url_snapshot, oi.image_url_snapshot) AS image_url,
+      COALESCE(oi.catalog_sync_status, s.catalog_sync_status) AS catalog_sync_status,
+      COALESCE(olm.supplier_paid, om.supplier_paid, 0) AS supplier_paid
+    FROM sales s
+    LEFT JOIN order_items oi ON oi.order_code=s.order_code AND oi.barcode=s.barcode
+    LEFT JOIN order_line_meta olm ON olm.order_code=s.order_code AND olm.barcode=s.barcode
+    LEFT JOIN order_meta om ON om.order_code=s.order_code
+    WHERE COALESCE(olm.supplier_id, s.supplier_id, om.supplier_id) = ?
+    ORDER BY datetime(s.created_at) DESC, s.order_code, s.barcode
+  `).all(supplier.id);
+
+  const productMap = new Map();
+  if (supplier.catalog_supplier_key) {
+    const catalogRows = db.prepare(`
+      SELECT barcode, item_name, image_url, vendor_price_usd, is_available,
+             is_archived, stock_status
+      FROM product_catalog_cache
+      WHERE supplier_key=?
+      ORDER BY item_name COLLATE NOCASE, barcode
+    `).all(supplier.catalog_supplier_key);
+    for (const product of catalogRows) {
+      productMap.set(product.barcode, {
+        ...product,
+        units_sold: 0,
+        order_codes: new Set(),
+        known_cost_usd: 0,
+        missing_cost_items: 0,
+      });
+    }
+  }
+
+  const orderMap = new Map();
+  let knownCostUsd = 0;
+  let paidAmountUsd = 0;
+  let outstandingUsd = 0;
+  let missingCostItems = 0;
+  let unitsSold = 0;
+
+  for (const sale of sales) {
+    const barcode = String(sale.barcode || "");
+    if (!productMap.has(barcode)) {
+      productMap.set(barcode, {
+        barcode,
+        item_name: sale.item_name || barcode || "Unknown item",
+        image_url: sale.image_url || null,
+        vendor_price_usd: sale.unit_supplier_cost_usd ?? null,
+        is_available: null,
+        is_archived: null,
+        stock_status: null,
+        units_sold: 0,
+        order_codes: new Set(),
+        known_cost_usd: 0,
+        missing_cost_items: 0,
+      });
+    }
+    const product = productMap.get(barcode);
+    const quantity = Number(sale.quantity || 0);
+    product.units_sold += quantity;
+    product.order_codes.add(sale.order_code);
+    unitsSold += quantity;
+
+    const missingCost = sale.cost == null;
+    if (missingCost) {
+      product.missing_cost_items += 1;
+      missingCostItems += 1;
+    } else {
+      const cost = Number(sale.cost);
+      product.known_cost_usd += cost;
+      knownCostUsd += cost;
+      if (sale.supplier_paid) paidAmountUsd += cost;
+      else outstandingUsd += cost;
+    }
+
+    if (!orderMap.has(sale.order_code)) {
+      orderMap.set(sale.order_code, {
+        order_code: sale.order_code,
+        created_at: sale.created_at,
+        units: 0,
+        known_cost_usd: 0,
+        revenue_usd: 0,
+        profit_usd: 0,
+        missing_cost_items: 0,
+        all_paid: true,
+        barcodes: new Set(),
+      });
+    }
+    const order = orderMap.get(sale.order_code);
+    order.units += quantity;
+    order.revenue_usd += Number(sale.total_sale || 0);
+    order.barcodes.add(barcode);
+    if (missingCost) {
+      order.missing_cost_items += 1;
+      order.profit_usd = null;
+      order.all_paid = false;
+    } else {
+      order.known_cost_usd += Number(sale.cost);
+      if (order.profit_usd != null) order.profit_usd += Number(sale.profit || 0);
+      if (!sale.supplier_paid) order.all_paid = false;
+    }
+  }
+
+  const products = Array.from(productMap.values()).map((product) => ({
+    ...product,
+    current_vendor_price_usd: product.vendor_price_usd,
+    order_count: product.order_codes.size,
+    order_codes: undefined,
+    total_cost_usd: product.missing_cost_items ? null : product.known_cost_usd,
+  })).sort((a, b) => Number(b.units_sold) - Number(a.units_sold) ||
+    String(a.item_name).localeCompare(String(b.item_name)));
+
+  const orders = Array.from(orderMap.values()).map((order) => ({
+    ...order,
+    sale_date: order.created_at,
+    product_count: order.barcodes.size,
+    barcodes: undefined,
+    total_cost_usd: order.missing_cost_items ? null : order.known_cost_usd,
+    supplier_paid: order.all_paid ? 1 : 0,
+  }));
+
+  return {
+    ok: true,
+    supplier,
+    summary: {
+      catalog_products: products.length,
+      products_sold: products.filter((product) => product.units_sold > 0).length,
+      units_sold: unitsSold,
+      orders: orders.length,
+      known_cost_usd: knownCostUsd,
+      total_cost_usd: missingCostItems ? null : knownCostUsd,
+      paid_amount_usd: paidAmountUsd,
+      outstanding_usd: outstandingUsd,
+      missing_cost_items: missingCostItems,
+    },
+    products,
+    orders,
+  };
+}
+
 module.exports = {
   getAllSuppliers,
   getSupplierById,
@@ -185,6 +333,7 @@ module.exports = {
   updateSupplier,
   renameSupplier,
   deleteSupplier,
+  getSupplierDetails,
   resolveCatalogSupplier,
   normalizeColor,
 };

@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld("api", {
   suppliersRename: (id, name) => ipcRenderer.invoke("suppliers:rename", { id, name }),
   suppliersDelete: (id) => ipcRenderer.invoke("suppliers:delete", id),
   suppliersGetSummary: (opts) => ipcRenderer.invoke("suppliers:getSummary", opts || {}),
+  suppliersGetDetails: (id) => ipcRenderer.invoke("suppliers:getDetails", id),
   openSuppliers: () => ipcRenderer.invoke("open-suppliers"),
   openSettlements: () => ipcRenderer.invoke("open-settlements"),
   openTransactions: () => ipcRenderer.invoke("open-transactions"),
