@@ -121,6 +121,7 @@ function initDatabase(userDataPath) {
   ensureOrderLineMetaTable(db);
   ensureOrderItemsTable(db);
   ensureProductCatalogCacheTables(db);
+  ensureProfitDistributionTables(db);
 
   // Ensure a default wallet config row exists
   const existing = db.prepare("SELECT value FROM config WHERE key=?").get("walletConfig");
@@ -458,6 +459,81 @@ function ensureProductCatalogCacheTables(dbConn) {
       cached_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `);
+}
+
+function ensureProfitDistributionTables(dbConn) {
+  dbConn.exec(`
+    CREATE TABLE IF NOT EXISTS profit_split_versions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      is_active INTEGER NOT NULL DEFAULT 0,
+      is_historical INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS profit_split_members (
+      version_id INTEGER NOT NULL REFERENCES profit_split_versions(id),
+      party_key TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      share_units INTEGER NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (version_id, party_key)
+    );
+    CREATE TABLE IF NOT EXISTS profit_distribution_batches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      label TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'regular',
+      split_version_id INTEGER NOT NULL REFERENCES profit_split_versions(id),
+      total_profit_lbp INTEGER NOT NULL DEFAULT 0,
+      cutoff_order_code TEXT,
+      cutoff_transaction_id INTEGER,
+      order_count INTEGER NOT NULL DEFAULT 0,
+      missing_cost_orders INTEGER NOT NULL DEFAULT 0,
+      notes TEXT DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS profit_distribution_orders (
+      batch_id INTEGER NOT NULL REFERENCES profit_distribution_batches(id),
+      order_code TEXT NOT NULL UNIQUE,
+      order_date TEXT,
+      net_profit_lbp INTEGER,
+      PRIMARY KEY (batch_id, order_code)
+    );
+    CREATE TABLE IF NOT EXISTS profit_distribution_allocations (
+      batch_id INTEGER NOT NULL REFERENCES profit_distribution_batches(id),
+      party_key TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      share_units INTEGER NOT NULL,
+      amount_lbp INTEGER NOT NULL,
+      paid_amount_lbp INTEGER NOT NULL DEFAULT 0,
+      is_business INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (batch_id, party_key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_profit_distribution_orders_batch
+      ON profit_distribution_orders(batch_id);
+    CREATE INDEX IF NOT EXISTS idx_profit_distribution_batches_created
+      ON profit_distribution_batches(created_at DESC, id DESC);
+  `);
+
+  const count = Number(dbConn.prepare("SELECT COUNT(*) AS count FROM profit_split_versions").get()?.count || 0);
+  if (count) return;
+  const addVersion = dbConn.prepare(`
+    INSERT INTO profit_split_versions (name, is_active, is_historical, created_at)
+    VALUES (?, ?, ?, datetime('now'))
+  `);
+  const addMember = dbConn.prepare(`
+    INSERT INTO profit_split_members (version_id, party_key, display_name, share_units, sort_order)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  dbConn.transaction(() => {
+    const historicalId = addVersion.run("Historical split", 0, 1).lastInsertRowid;
+    addMember.run(historicalId, "ahmad", "Ahmad Alam El Deen", 3, 1);
+    addMember.run(historicalId, "abdallah", "Abdallah", 1, 2);
+    addMember.run(historicalId, "business", "Business", 2, 3);
+    const currentId = addVersion.run("Current split", 1, 0).lastInsertRowid;
+    addMember.run(currentId, "ahmad", "Ahmad Alam El Deen", 43, 1);
+    addMember.run(currentId, "abdallah", "Abdallah", 34, 2);
+    addMember.run(currentId, "business", "Business", 23, 3);
+  })();
 }
 
 function closeDatabase() {
