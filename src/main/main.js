@@ -1064,6 +1064,36 @@ ipcMain.handle("catalog:retryOrderItems", async () => {
     return { ok: false, error: String(error.message || error), warning: refreshWarning };
   }
 });
+ipcMain.handle("catalog:getBackfillPreview", async () => {
+  let warning = null;
+  try {
+    await productCatalog.refreshCache();
+  } catch (error) {
+    warning = String(error.message || error);
+  }
+  try {
+    return { ok: true, ...orderItemsDb.getBackfillPreview(), warning };
+  } catch (error) {
+    return { ok: false, error: String(error.message || error), warning };
+  }
+});
+ipcMain.handle("catalog:backfillMissingData", async (_evt, options) => {
+  try {
+    const applyCurrentVendorPrice = options?.applyCurrentVendorPrice === true;
+    const result = orderItemsDb.backfillMissingProductData({ applyCurrentVendorPrice });
+    let insertedRows = 0;
+    if (applyCurrentVendorPrice) {
+      for (const orderCode of result.order_codes) {
+        insertedRows += Number(
+          salesDb.rebuildSalesFromStoredOrderItems(orderCode)?.inserted_rows || 0
+        );
+      }
+    }
+    return { ok: true, ...result, sales_rows_rebuilt: insertedRows };
+  } catch (error) {
+    return { ok: false, error: String(error.message || error) };
+  }
+});
 ipcMain.handle("catalog:createProduct", async (_evt, payload) => {
   try {
     return { ok: true, product: await productCatalog.createProduct(payload || {}) };

@@ -59,7 +59,7 @@ function aggregateOrderDetails(order) {
   return Array.from(grouped.values());
 }
 
-function enrichLine(base, existing = null) {
+function enrichLine(base, existing = null, { allowCostSnapshot = true } = {}) {
   if (!base.barcode) return {
     ...base,
     catalog_sync_status: "missing_barcode",
@@ -78,14 +78,19 @@ function enrichLine(base, existing = null) {
       cost_source: existing?.cost_source || null,
     };
   }
-  const preserve = existing?.cost_source === "catalog_snapshot" &&
-    existing?.unit_supplier_cost_usd != null;
+  const preserve = !!existing?.cost_source && existing?.unit_supplier_cost_usd != null;
+  const currentVendorPrice = product.vendor_price_usd == null
+    ? null : Number(product.vendor_price_usd);
   const unitCost = preserve ? Number(existing.unit_supplier_cost_usd) :
-    product.vendor_price_usd == null ? null : Number(product.vendor_price_usd);
+    allowCostSnapshot ? currentVendorPrice : null;
   const supplier = preserve && existing?.supplier_id
     ? { id: existing.supplier_id }
     : getSupplierByCatalogKey(product.supplier_key);
-  const status = unitCost == null ? "missing_vendor_price" : "matched";
+  const status = unitCost != null
+    ? "matched"
+    : currentVendorPrice == null
+      ? "missing_vendor_price"
+      : "historical_cost_review";
   return {
     ...base,
     item_name_snapshot: preserve ? existing.item_name_snapshot :
@@ -99,7 +104,11 @@ function enrichLine(base, existing = null) {
     total_supplier_cost_usd: unitCost == null ? null : unitCost * Number(base.quantity || 0),
     cost_source: unitCost == null ? null : existing?.cost_source || "catalog_snapshot",
     catalog_sync_status: status,
-    catalog_error: status === "missing_vendor_price" ? "Product has no Vendor Price" : null,
+    catalog_error: status === "missing_vendor_price"
+      ? "Product has no Vendor Price"
+      : status === "historical_cost_review"
+        ? "Current Vendor Price was found but was not applied to this historical item"
+        : null,
     cost_snapshot_at: unitCost == null ? null :
       existing?.cost_snapshot_at || new Date().toISOString(),
   };
@@ -150,7 +159,7 @@ function retryPendingItems() {
   const db = getDb();
   const rows = db.prepare(
     "SELECT * FROM order_items WHERE catalog_sync_status IN " +
-    "('pending','error','missing_product','missing_vendor_price') ORDER BY order_code,id"
+    "('pending','error','missing_product','missing_vendor_price','historical_cost_review') ORDER BY order_code,id"
   ).all();
   const orderCodes = new Set();
   db.transaction(() => {
@@ -162,7 +171,91 @@ function retryPendingItems() {
   return { attempted: rows.length, order_codes: Array.from(orderCodes) };
 }
 
+const BACKFILL_STATUSES = [
+  "pending", "error", "missing_product", "missing_vendor_price", "historical_cost_review",
+];
+
+function getBackfillRows(db = getDb()) {
+  return db.prepare(
+    `SELECT * FROM order_items
+     WHERE catalog_sync_status IN (${BACKFILL_STATUSES.map(() => "?").join(",")})
+     ORDER BY order_created_at, order_code, id`
+  ).all(...BACKFILL_STATUSES);
+}
+
+function getBackfillPreview() {
+  const db = getDb();
+  const rows = getBackfillRows(db);
+  const counts = Object.fromEntries(BACKFILL_STATUSES.map((status) => [status, 0]));
+  let metadataCandidates = 0;
+  let currentPriceCandidates = 0;
+  for (const row of rows) {
+    counts[row.catalog_sync_status] = Number(counts[row.catalog_sync_status] || 0) + 1;
+    const product = row.barcode ? catalogCache.getProductByBarcode(row.barcode) : null;
+    if (product) metadataCandidates += 1;
+    if (product?.vendor_price_usd != null) currentPriceCandidates += 1;
+  }
+  const legacySales = db.prepare(`
+    SELECT COUNT(*) AS count FROM sales
+    WHERE catalog_product_id IS NULL AND barcode IS NOT NULL AND barcode != ''
+  `).get();
+  return {
+    total_candidates: rows.length,
+    metadata_candidates: metadataCandidates,
+    current_price_candidates: currentPriceCandidates,
+    legacy_sales_without_catalog_snapshot: Number(legacySales?.count || 0),
+    by_status: counts,
+  };
+}
+
+function syncSaleMetadata(db, line) {
+  if (!line.barcode) return;
+  db.prepare(`
+    UPDATE sales SET
+      catalog_product_id = COALESCE(catalog_product_id, ?),
+      item_name_snapshot = COALESCE(item_name_snapshot, ?),
+      image_url_snapshot = COALESCE(image_url_snapshot, ?),
+      supplier_id = COALESCE(supplier_id, ?),
+      merchant_code = COALESCE(merchant_code, ?),
+      catalog_sync_status = ?
+    WHERE order_code = ? AND barcode = ?
+  `).run(
+    line.catalog_product_id || null, line.item_name_snapshot || null,
+    line.image_url_snapshot || null, line.supplier_id || null,
+    line.merchant_code || null, line.catalog_sync_status,
+    line.order_code, line.barcode
+  );
+}
+
+function backfillMissingProductData({ applyCurrentVendorPrice = false } = {}) {
+  const db = getDb();
+  const rows = getBackfillRows(db);
+  const orderCodes = new Set();
+  const result = {
+    attempted: rows.length, metadata_updated: 0, costs_snapshotted: 0,
+    still_missing_product: 0, missing_vendor_price: 0, historical_cost_review: 0,
+    order_codes: [], apply_current_vendor_price: !!applyCurrentVendorPrice,
+  };
+  db.transaction(() => {
+    for (const row of rows) {
+      const next = enrichLine(row, row, { allowCostSnapshot: !!applyCurrentVendorPrice });
+      saveLine(next);
+      syncSaleMetadata(db, next);
+      if (next.catalog_product_id) result.metadata_updated += 1;
+      if (next.catalog_sync_status === "matched" && next.cost_snapshot_at) {
+        result.costs_snapshotted += 1;
+        orderCodes.add(next.order_code);
+      }
+      if (next.catalog_sync_status === "missing_product") result.still_missing_product += 1;
+      if (next.catalog_sync_status === "missing_vendor_price") result.missing_vendor_price += 1;
+      if (next.catalog_sync_status === "historical_cost_review") result.historical_cost_review += 1;
+    }
+  })();
+  result.order_codes = Array.from(orderCodes);
+  return result;
+}
+
 module.exports = {
   aggregateOrderDetails, enrichLine, getOrderItems, getOrderItemsMap,
-  processOrderItems, retryPendingItems,
+  backfillMissingProductData, getBackfillPreview, processOrderItems, retryPendingItems,
 };

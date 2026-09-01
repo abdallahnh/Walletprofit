@@ -72,6 +72,8 @@ contextBridge.exposeInMainWorld("api", {
   catalogGetMappings: () => ipcRenderer.invoke("catalog:getMappings"),
   catalogRefreshCache: () => ipcRenderer.invoke("catalog:refreshCache"),
   catalogRetryOrderItems: () => ipcRenderer.invoke("catalog:retryOrderItems"),
+  catalogGetBackfillPreview: () => ipcRenderer.invoke("catalog:getBackfillPreview"),
+  catalogBackfillMissingData: (options) => ipcRenderer.invoke("catalog:backfillMissingData", options || {}),
   catalogCreateProduct: (payload) => ipcRenderer.invoke("catalog:createProduct", payload || {}),
   catalogUpdateProduct: (id, updates) => ipcRenderer.invoke("catalog:updateProduct", id, updates || {}),
   catalogArchiveProduct: (id) => ipcRenderer.invoke("catalog:archiveProduct", id),

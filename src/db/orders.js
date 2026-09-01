@@ -300,6 +300,8 @@ function getSupplierSummary(opts = {}) {
             supplier_cost: 0,
             payable: 0,
             profit: 0,
+            units_sold: 0,
+            _products: new Set(),
           });
         }
 
@@ -313,6 +315,8 @@ function getSupplierSummary(opts = {}) {
         row.supplier_cost += Number(line.supplier_cost_lbp || 0);
         if (!line.supplier_paid) row.payable += Number(line.supplier_cost_lbp || 0);
         row.profit += Math.round((o.merchant_payout || 0) * share) - Number(line.supplier_cost_lbp || 0);
+        row.units_sold += Number(line.quantity || 0);
+        if (line.barcode) row._products.add(line.barcode);
       }
       continue;
     }
@@ -329,6 +333,8 @@ function getSupplierSummary(opts = {}) {
         supplier_cost: 0,
         payable: 0,
         profit: 0,
+        units_sold: 0,
+        _products: new Set(),
       });
     }
 
@@ -340,9 +346,18 @@ function getSupplierSummary(opts = {}) {
       row.payable += o.supplier_cost || 0;
     }
     row.profit += o.net_profit || 0;
+    const supplierItems = (o.order_items || []).filter((item) =>
+      !o.supplier_id || !item.supplier_id || Number(item.supplier_id) === Number(o.supplier_id)
+    );
+    row.units_sold += supplierItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+    for (const item of supplierItems) if (item.barcode) row._products.add(item.barcode);
   }
 
-  return Array.from(bySupplier.values()).sort((a, b) =>
+  return Array.from(bySupplier.values()).map((row) => ({
+    ...row,
+    product_count: row._products.size,
+    _products: undefined,
+  })).sort((a, b) =>
     a.supplier_name.localeCompare(b.supplier_name)
   );
 }

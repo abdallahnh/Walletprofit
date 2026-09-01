@@ -483,6 +483,8 @@ function renderSupplierSummary(rows) {
             supplier_cost: 0,
             payable: 0,
             profit: 0,
+            units_sold: 0,
+            products: new Set(),
           });
         }
 
@@ -497,6 +499,8 @@ function renderSupplierSummary(rows) {
         if (!line.supplier_paid) row.payable += Number(line.supplier_cost_lbp || 0);
         row.profit +=
           Math.round((o.merchant_payout || 0) * share) - Number(line.supplier_cost_lbp || 0);
+        row.units_sold += Number(line.quantity || 0);
+        if (line.barcode) row.products.add(line.barcode);
       }
       continue;
     }
@@ -512,6 +516,8 @@ function renderSupplierSummary(rows) {
         supplier_cost: 0,
         payable: 0,
         profit: 0,
+        units_sold: 0,
+        products: new Set(),
       });
     }
 
@@ -521,21 +527,25 @@ function renderSupplierSummary(rows) {
     row.supplier_cost += Number(o.supplier_cost || 0);
     if (!o.supplier_paid) row.payable += Number(o.supplier_cost || 0);
     row.profit += Number(o.net_profit || 0);
+    const supplierItems=(o.order_items||[]).filter(item=>!o.supplier_id||!item.supplier_id||Number(item.supplier_id)===Number(o.supplier_id));
+    row.units_sold+=supplierItems.reduce((sum,item)=>sum+Number(item.quantity||0),0);
+    for(const item of supplierItems)if(item.barcode)row.products.add(item.barcode);
   }
 
-  let summaryRows = Array.from(bySupplier.values());
+  let summaryRows = Array.from(bySupplier.values()).map(row=>({...row,product_count:row.products.size}));
   summaryRows = sortRows(summaryRows, summarySortKey, summarySortDir);
 
   const totals = summaryRows.reduce(
     (acc, s) => {
       acc.orders += s.orders;
+      acc.units_sold += s.units_sold;
       acc.revenue += s.revenue;
       acc.supplier_cost += s.supplier_cost;
       acc.payable += s.payable;
       acc.profit += s.profit;
       return acc;
     },
-    { orders: 0, revenue: 0, supplier_cost: 0, payable: 0, profit: 0 }
+    { orders: 0, units_sold: 0, revenue: 0, supplier_cost: 0, payable: 0, profit: 0 }
   );
 
   const bodyHtml = summaryRows
@@ -544,6 +554,8 @@ function renderSupplierSummary(rows) {
     <tr>
       <td>${escapeHtml(s.supplier_name)}</td>
       <td class="num">${s.orders}</td>
+      <td class="num">${s.product_count}</td>
+      <td class="num">${s.units_sold}</td>
       <td class="num">${fmt(s.revenue)}</td>
       <td class="num">${fmt(s.supplier_cost)}</td>
       <td class="num">${fmt(s.payable)}</td>
@@ -558,6 +570,8 @@ function renderSupplierSummary(rows) {
     <tr class="summary-total-row">
       <td><b>Total</b></td>
       <td class="num"><b>${totals.orders}</b></td>
+      <td class="num">—</td>
+      <td class="num"><b>${totals.units_sold}</b></td>
       <td class="num"><b>${fmt(totals.revenue)}</b></td>
       <td class="num"><b>${fmt(totals.supplier_cost)}</b></td>
       <td class="num"><b>${fmt(totals.payable)}</b></td>
