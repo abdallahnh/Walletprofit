@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
+const Database = require("better-sqlite3");
 
 const database = require("../src/db/database");
 const walletDb = require("../src/db/wallet");
@@ -25,6 +26,35 @@ function createDatabase() {
 
 test.afterEach(() => {
   database.closeDatabase();
+});
+
+test("database migration preserves an incompatible legacy order_items table", () => {
+  database.closeDatabase();
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "wallet-profit-legacy-items-"));
+  const dbPath = path.join(directory, "wallet-profit.sqlite");
+  const legacy = new Database(dbPath);
+  legacy.exec(`
+    CREATE TABLE order_items (
+      id INTEGER PRIMARY KEY,
+      order_id INTEGER,
+      barcode TEXT,
+      quantity INTEGER,
+      price REAL
+    );
+    INSERT INTO order_items (id, order_id, barcode, quantity, price)
+    VALUES (1, 99, 'LEGACY-BARCODE', 2, 12.5);
+  `);
+  legacy.close();
+
+  const db = database.initDatabase(directory);
+  const columns = db.prepare("PRAGMA table_info(order_items)").all().map((row) => row.name);
+  assert.ok(columns.includes("order_code"));
+  assert.ok(columns.includes("line_key"));
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM order_items").get().count, 0);
+  assert.equal(
+    db.prepare("SELECT barcode FROM order_items_legacy WHERE id=1").get().barcode,
+    "LEGACY-BARCODE"
+  );
 });
 
 test("JSON replacement restore includes company expenses", () => {

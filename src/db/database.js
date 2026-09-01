@@ -367,6 +367,20 @@ function ensureSalesSnapshotColumns(dbConn) {
 }
 
 function ensureOrderItemsTable(dbConn) {
+  const existingColumns = dbConn.prepare("PRAGMA table_info(order_items)").all();
+  if (existingColumns.length) {
+    const names = new Set(existingColumns.map((column) => column.name));
+    if (!names.has("order_code") || !names.has("line_key")) {
+      let legacyName = "order_items_legacy";
+      let suffix = 2;
+      while (dbConn.prepare("SELECT 1 FROM sqlite_master WHERE name=?").get(legacyName)) {
+        legacyName = `order_items_legacy_${suffix}`;
+        suffix += 1;
+      }
+      dbConn.exec(`ALTER TABLE order_items RENAME TO ${legacyName}`);
+      console.warn(`Preserved incompatible legacy order_items table as ${legacyName}`);
+    }
+  }
   dbConn.exec(`
     CREATE TABLE IF NOT EXISTS order_items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

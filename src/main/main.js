@@ -295,9 +295,17 @@ app.whenReady().then(() => {
   // DB should ALWAYS be in userData so it persists
   const userData = app.getPath("userData");
   logger.setLogFile(userData);
-  database.initDatabase(userData);
   initializeCloud();
+  database.initDatabase(userData);
   createWindow();
+}).catch((error) => {
+  const message = String(error?.stack || error?.message || error);
+  logger.error("Application startup failed", { error: message });
+  dialog.showErrorBox(
+    "Wallet Profit could not start",
+    "The local database could not be initialized. Your data was not deleted.\n\n" + message
+  );
+  app.quit();
 });
 
 app.on("window-all-closed", () => {
