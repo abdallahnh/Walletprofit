@@ -115,9 +115,11 @@ function initDatabase(userDataPath) {
   ensureOrderMetaColumns(db);
   ensureSuppliersColumns(db);
   ensureSalesUniqueness(db);
+  ensureSalesSnapshotColumns(db);
   ensurePriceHistory(db);
   ensureCompanyExpensesTable(db);
   ensureOrderLineMetaTable(db);
+  ensureOrderItemsTable(db);
   ensureProductCatalogCacheTables(db);
 
   // Ensure a default wallet config row exists
@@ -217,6 +219,14 @@ function ensureOrderMetaColumns(dbConn) {
   if (!existing.has("adjusted_items_count")) {
     dbConn.exec("ALTER TABLE order_meta ADD COLUMN adjusted_items_count INTEGER DEFAULT 0");
   }
+  if (!existing.has("cost_source")) {
+    dbConn.exec("ALTER TABLE order_meta ADD COLUMN cost_source TEXT");
+    dbConn.exec(`
+      UPDATE order_meta SET cost_source='manual_override'
+      WHERE cost_source IS NULL
+        AND (supplier_cost > 0 OR supplier_paid = 1 OR supplier_id IS NOT NULL)
+    `);
+  }
 }
 
 function ensureProductsColumns(dbConn) {
@@ -295,6 +305,16 @@ function ensureOrderLineMetaTable(dbConn) {
     CREATE INDEX IF NOT EXISTS idx_order_line_meta_supplier
     ON order_line_meta(supplier_id)
   `);
+
+  const existing = new Set(
+    dbConn.prepare("PRAGMA table_info(order_line_meta)").all().map((c) => c.name)
+  );
+  if (!existing.has("cost_source")) {
+    dbConn.exec("ALTER TABLE order_line_meta ADD COLUMN cost_source TEXT");
+  }
+  if (!existing.has("merchant_code")) {
+    dbConn.exec("ALTER TABLE order_line_meta ADD COLUMN merchant_code TEXT");
+  }
 }
 
 function ensurePriceHistory(dbConn) {
@@ -324,6 +344,58 @@ function ensurePriceHistory(dbConn) {
       FROM product_price_history h
       WHERE h.product_id = p.id
     )
+  `);
+}
+
+function ensureSalesSnapshotColumns(dbConn) {
+  const existing = new Set(dbConn.prepare("PRAGMA table_info(sales)").all().map((c) => c.name));
+  const additions = [
+    ["catalog_product_id", "TEXT"],
+    ["item_name_snapshot", "TEXT"],
+    ["image_url_snapshot", "TEXT"],
+    ["unit_supplier_cost_usd", "REAL"],
+    ["total_supplier_cost_usd", "REAL"],
+    ["supplier_id", "INTEGER REFERENCES suppliers(id)"],
+    ["merchant_code", "TEXT"],
+    ["catalog_sync_status", "TEXT"],
+    ["cost_source", "TEXT"],
+    ["cost_snapshot_at", "TEXT"],
+  ];
+  for (const [name, type] of additions) {
+    if (!existing.has(name)) dbConn.exec(`ALTER TABLE sales ADD COLUMN ${name} ${type}`);
+  }
+}
+
+function ensureOrderItemsTable(dbConn) {
+  dbConn.exec(`
+    CREATE TABLE IF NOT EXISTS order_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_code TEXT NOT NULL,
+      line_key TEXT NOT NULL,
+      barcode TEXT,
+      item_name_snapshot TEXT NOT NULL,
+      quantity REAL NOT NULL DEFAULT 0,
+      unit_selling_price_usd REAL,
+      total_selling_price_usd REAL,
+      catalog_product_id TEXT,
+      image_url_snapshot TEXT,
+      supplier_id INTEGER REFERENCES suppliers(id),
+      supplier_key TEXT,
+      merchant_code TEXT,
+      unit_supplier_cost_usd REAL,
+      total_supplier_cost_usd REAL,
+      cost_source TEXT,
+      catalog_sync_status TEXT NOT NULL DEFAULT 'pending',
+      catalog_error TEXT,
+      order_created_at TEXT,
+      cost_snapshot_at TEXT,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(order_code, line_key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_code);
+    CREATE INDEX IF NOT EXISTS idx_order_items_barcode ON order_items(barcode);
+    CREATE INDEX IF NOT EXISTS idx_order_items_catalog_status ON order_items(catalog_sync_status);
+    CREATE INDEX IF NOT EXISTS idx_order_items_supplier ON order_items(supplier_id);
   `);
 }
 

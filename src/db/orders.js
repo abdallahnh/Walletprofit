@@ -174,7 +174,7 @@ function computeOrders() {
       adjusted_items_count: Number(meta.adjusted_items_count || 0),
       item_count: itemCount,
       is_splittable: itemCount > 1,
-      is_multi_supplier: !!meta.is_multi_supplier || itemCount > 1,
+      is_multi_supplier: !!meta.is_multi_supplier,
       supplier_line_ids: meta.supplier_line_ids || (meta.supplier_id ? [meta.supplier_id] : []),
       line_meta: meta.line_meta || [],
       order_items: orderItems,
@@ -436,12 +436,13 @@ function upsertOrderMeta({
 
   db.prepare(
     `
-    INSERT INTO order_meta(order_code, supplier_cost, supplier_paid, supplier_id, updated_at)
-    VALUES(?, ?, ?, ?, datetime('now'))
+    INSERT INTO order_meta(order_code, supplier_cost, supplier_paid, supplier_id, cost_source, updated_at)
+    VALUES(?, ?, ?, ?, 'manual_override', datetime('now'))
     ON CONFLICT(order_code) DO UPDATE SET
       supplier_cost=excluded.supplier_cost,
       supplier_paid=excluded.supplier_paid,
       supplier_id=excluded.supplier_id,
+      cost_source='manual_override',
       updated_at=datetime('now')
   `
   ).run(order_code, cost, paid, resolvedSupplierId);

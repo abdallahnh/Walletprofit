@@ -6,8 +6,13 @@ function getLineMetaRows(db, orderCode) {
     .prepare(
       `
     SELECT olm.order_code, olm.barcode, olm.supplier_id, olm.supplier_cost_lbp, olm.supplier_paid,
-           p.item_name, s.name AS supplier_name, s.color AS supplier_color, s.phone AS supplier_phone
+           olm.cost_source, olm.merchant_code,
+           COALESCE(oi.item_name_snapshot, p.item_name) AS item_name,
+           oi.quantity, oi.image_url_snapshot, oi.unit_supplier_cost_usd,
+           oi.catalog_sync_status, oi.catalog_error,
+           s.name AS supplier_name, s.color AS supplier_color, s.phone AS supplier_phone
     FROM order_line_meta olm
+    LEFT JOIN order_items oi ON oi.order_code=olm.order_code AND oi.barcode=olm.barcode
     LEFT JOIN products p ON p.barcode = olm.barcode
     LEFT JOIN suppliers s ON s.id = olm.supplier_id
     WHERE olm.order_code = ?
@@ -21,9 +26,9 @@ function getSalesItemCount(db, orderCode) {
   const row = db
     .prepare(
       `
-    SELECT COUNT(DISTINCT barcode) AS cnt
-    FROM sales
-    WHERE order_code = ? AND barcode IS NOT NULL AND barcode != ''
+    SELECT COUNT(*) AS cnt
+    FROM order_items
+    WHERE order_code = ?
   `
     )
     .get(orderCode);
@@ -45,6 +50,7 @@ function ensureLineMetaFromSales(orderCode) {
     FROM sales s
     LEFT JOIN products p ON p.id = s.product_id
     WHERE s.order_code = ? AND s.barcode IS NOT NULL AND s.barcode != ''
+      AND (s.catalog_product_id IS NULL OR s.cost_source IS NOT NULL)
     ORDER BY p.item_name, s.barcode
   `
     )
@@ -55,8 +61,8 @@ function ensureLineMetaFromSales(orderCode) {
   }
 
   const insert = db.prepare(`
-    INSERT OR IGNORE INTO order_line_meta (order_code, barcode, supplier_id, supplier_cost_lbp, supplier_paid, updated_at)
-    VALUES (?, ?, NULL, ?, 0, datetime('now'))
+    INSERT OR IGNORE INTO order_line_meta (order_code, barcode, supplier_id, supplier_cost_lbp, supplier_paid, cost_source, updated_at)
+    VALUES (?, ?, NULL, ?, 0, 'legacy_snapshot', datetime('now'))
   `);
 
   for (const s of salesRows) {
@@ -92,6 +98,7 @@ function getOrderLineTotals(orderCode) {
   const names = [...new Set(lines.map((l) => l.supplier_name).filter(Boolean))];
   const totalCost = lines.reduce((sum, l) => sum + Number(l.supplier_cost_lbp || 0), 0);
   const allPaid = lines.every((l) => !Number(l.supplier_cost_lbp || 0) || l.supplier_paid);
+  const hasManualOverride = lines.some((l) => l.cost_source === "manual_override");
 
   return {
     has_lines: true,
@@ -107,7 +114,8 @@ function getOrderLineTotals(orderCode) {
         : names.length === 1
           ? names[0]
           : names.join(", "),
-    is_multi_supplier: supplierIds.length > 1 || lines.length > 1,
+    is_multi_supplier: supplierIds.length > 1,
+    cost_source: hasManualOverride ? "manual_override" : "catalog_snapshot",
     lines,
   };
 }
@@ -122,15 +130,16 @@ function reconcileOrderMetaFromLines(orderCode) {
 
   db.prepare(
     `
-    INSERT INTO order_meta (order_code, supplier_cost, supplier_paid, supplier_id, updated_at)
-    VALUES (?, ?, ?, ?, datetime('now'))
+    INSERT INTO order_meta (order_code, supplier_cost, supplier_paid, supplier_id, cost_source, updated_at)
+    VALUES (?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(order_code) DO UPDATE SET
-      supplier_cost = excluded.supplier_cost,
-      supplier_paid = excluded.supplier_paid,
-      supplier_id = excluded.supplier_id,
+      supplier_cost = CASE WHEN order_meta.cost_source='manual_override' THEN order_meta.supplier_cost ELSE excluded.supplier_cost END,
+      supplier_paid = CASE WHEN order_meta.cost_source='manual_override' THEN order_meta.supplier_paid ELSE excluded.supplier_paid END,
+      supplier_id = CASE WHEN order_meta.cost_source='manual_override' THEN order_meta.supplier_id ELSE excluded.supplier_id END,
+      cost_source = CASE WHEN order_meta.cost_source='manual_override' THEN order_meta.cost_source ELSE excluded.cost_source END,
       updated_at = datetime('now')
   `
-  ).run(code, totals.supplier_cost, totals.supplier_paid, totals.supplier_id);
+  ).run(code, totals.supplier_cost, totals.supplier_paid, totals.supplier_id, totals.cost_source);
 }
 
 function upsertLineMeta({ order_code, barcode, supplier_id, supplier_cost_lbp, supplier_paid }) {
@@ -149,17 +158,40 @@ function upsertLineMeta({ order_code, barcode, supplier_id, supplier_cost_lbp, s
   const db = getDb();
   db.prepare(
     `
-    INSERT INTO order_line_meta (order_code, barcode, supplier_id, supplier_cost_lbp, supplier_paid, updated_at)
-    VALUES (?, ?, ?, ?, ?, datetime('now'))
+    INSERT INTO order_line_meta (order_code, barcode, supplier_id, supplier_cost_lbp, supplier_paid, cost_source, updated_at)
+    VALUES (?, ?, ?, ?, ?, 'manual_override', datetime('now'))
     ON CONFLICT(order_code, barcode) DO UPDATE SET
       supplier_id = excluded.supplier_id,
       supplier_cost_lbp = excluded.supplier_cost_lbp,
       supplier_paid = excluded.supplier_paid,
+      cost_source = 'manual_override',
       updated_at = datetime('now')
   `
   ).run(code, bc, sid, cost, paid);
 
   reconcileOrderMetaFromLines(code);
+  return { ok: true };
+}
+
+function upsertAutomaticLineMeta({ order_code, barcode, supplier_id, supplier_cost_lbp, merchant_code }) {
+  const db = getDb();
+  const existing = db.prepare(
+    "SELECT cost_source FROM order_line_meta WHERE order_code=? AND barcode=?"
+  ).get(order_code, barcode);
+  if (existing?.cost_source === "manual_override") return { ok: true, preserved_manual: true };
+  db.prepare(`
+    INSERT INTO order_line_meta (
+      order_code, barcode, supplier_id, supplier_cost_lbp, supplier_paid,
+      cost_source, merchant_code, updated_at
+    ) VALUES (?, ?, ?, ?, 0, 'catalog_snapshot', ?, datetime('now'))
+    ON CONFLICT(order_code,barcode) DO UPDATE SET
+      supplier_id=excluded.supplier_id,
+      supplier_cost_lbp=excluded.supplier_cost_lbp,
+      cost_source='catalog_snapshot',
+      merchant_code=excluded.merchant_code,
+      updated_at=datetime('now')
+  `).run(order_code, barcode, supplier_id || null, Math.round(supplier_cost_lbp || 0), merchant_code || null);
+  reconcileOrderMetaFromLines(order_code);
   return { ok: true };
 }
 
@@ -173,9 +205,9 @@ function getItemCountsByOrder() {
   const rows = db
     .prepare(
       `
-    SELECT order_code, COUNT(DISTINCT barcode) AS item_count
-    FROM sales
-    WHERE order_code IS NOT NULL AND barcode IS NOT NULL AND barcode != ''
+    SELECT order_code, COUNT(*) AS item_count
+    FROM order_items
+    WHERE order_code IS NOT NULL
     GROUP BY order_code
     HAVING item_count > 1
   `
@@ -188,11 +220,12 @@ function getOrderItemsMap(db) {
   const rows = db
     .prepare(
       `
-    SELECT s.order_code, s.barcode, s.quantity, p.item_name
-    FROM sales s
-    LEFT JOIN products p ON p.id = s.product_id
-    WHERE s.order_code IS NOT NULL AND s.barcode IS NOT NULL AND s.barcode != ''
-    ORDER BY s.order_code, p.item_name, s.barcode
+    SELECT order_code, barcode, quantity, item_name_snapshot AS item_name,
+           image_url_snapshot AS image_url, unit_supplier_cost_usd AS vendor_price_usd,
+           supplier_id, merchant_code, catalog_sync_status, catalog_error
+    FROM order_items
+    WHERE order_code IS NOT NULL
+    ORDER BY order_code, id
   `
     )
     .all();
@@ -204,6 +237,12 @@ function getOrderItemsMap(db) {
       barcode: r.barcode,
       item_name: r.item_name || r.barcode,
       quantity: Number(r.quantity || 0),
+      image_url: r.image_url || null,
+      vendor_price_usd: r.vendor_price_usd,
+      supplier_id: r.supplier_id,
+      merchant_code: r.merchant_code,
+      catalog_sync_status: r.catalog_sync_status,
+      catalog_error: r.catalog_error,
     });
   }
   return map;
@@ -214,6 +253,7 @@ module.exports = {
   getOrderLineTotals,
   ensureLineMetaFromSales,
   upsertLineMeta,
+  upsertAutomaticLineMeta,
   reconcileOrderMetaFromLines,
   clearLineMetaForOrder,
   getItemCountsByOrder,

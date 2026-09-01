@@ -588,6 +588,26 @@ function buildSupplierSelectHtml(selectedId, extraAttrs = "") {
   return options.join("");
 }
 
+function itemImageHtml(url) {
+  try {
+    const parsed = new URL(String(url || ""));
+    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error("Invalid protocol");
+    return `<img class="order-item-thumb" src="${escapeHtml(parsed.toString())}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.replaceWith(document.createTextNode('No image'))">`;
+  } catch {
+    return '<span class="order-item-placeholder">No image</span>';
+  }
+}
+
+function catalogStatusLabel(item) {
+  const status = String(item.catalog_sync_status || "");
+  if (status === "matched") return "Matched";
+  if (status === "missing_product") return "Missing Product";
+  if (status === "missing_vendor_price") return "Missing Vendor Price";
+  if (status === "missing_barcode") return "Missing Barcode";
+  if (status === "pending" || status === "error") return "Retry needed";
+  return "—";
+}
+
 function renderItemSubRow(orderCode, orderItems, lines, isSplit) {
   const tr = document.createElement("tr");
   tr.className = "line-sub-row";
@@ -606,14 +626,20 @@ function renderItemSubRow(orderCode, orderItems, lines, isSplit) {
   const rowsHtml = items
     .map((item) => {
       const line = lineByBarcode.get(item.barcode) || {};
+      const supplierId = line.supplier_id || item.supplier_id;
+      const vendorPrice = item.vendor_price_usd == null ? "—" : fmt(Number(item.vendor_price_usd));
+      const status = catalogStatusLabel(item);
       if (isSplit) {
         return `
     <tr data-barcode="${escapeHtml(item.barcode)}">
+      <td>${itemImageHtml(item.image_url)}</td>
       <td>${escapeHtml(item.item_name || item.barcode)}</td>
       <td>${escapeHtml(item.barcode || "")}</td>
+      <td class="num">${Number(item.quantity || 0)}</td>
+      <td class="num">${vendorPrice}</td>
       <td>
         <select class="inp sel-supplier-line" data-order="${escapeHtml(orderCode)}" data-barcode="${escapeHtml(item.barcode)}" style="min-width:120px;width:100%;">
-          ${buildSupplierSelectHtml(line.supplier_id)}
+          ${buildSupplierSelectHtml(supplierId)}
         </select>
       </td>
       <td class="num">
@@ -624,21 +650,26 @@ function renderItemSubRow(orderCode, orderItems, lines, isSplit) {
       <td style="text-align:center;">
         <input type="checkbox" class="inp-line-paid" data-order="${escapeHtml(orderCode)}" data-barcode="${escapeHtml(item.barcode)}" ${line.supplier_paid ? "checked" : ""} />
       </td>
+      <td class="catalog-status catalog-${escapeHtml(item.catalog_sync_status || '')}" title="${escapeHtml(item.catalog_error || '')}">${escapeHtml(status)}</td>
     </tr>`;
       }
 
       return `
     <tr data-barcode="${escapeHtml(item.barcode)}">
+      <td>${itemImageHtml(item.image_url)}</td>
       <td>${escapeHtml(item.item_name || item.barcode)}</td>
       <td>${escapeHtml(item.barcode || "")}</td>
-      <td class="num">${item.quantity || 1}</td>
+      <td class="num">${Number(item.quantity || 0)}</td>
+      <td class="num">${vendorPrice}</td>
+      <td>${escapeHtml(supplierListCache.find(s => Number(s.id) === Number(supplierId))?.name || "Unassigned")}</td>
+      <td class="catalog-status catalog-${escapeHtml(item.catalog_sync_status || '')}" title="${escapeHtml(item.catalog_error || '')}">${escapeHtml(status)}</td>
     </tr>`;
     })
     .join("");
 
   const headers = isSplit
-    ? `<tr><th>Item</th><th>Barcode</th><th>Supplier</th><th class="num">Cost</th><th>Paid</th></tr>`
-    : `<tr><th>Item</th><th>Barcode</th><th class="num">Qty</th></tr>`;
+    ? `<tr><th>Image</th><th>Item</th><th>Barcode</th><th class="num">Qty</th><th class="num">Vendor Price</th><th>Supplier</th><th class="num">Cost</th><th>Paid</th><th>Status</th></tr>`
+    : `<tr><th>Image</th><th>Item</th><th>Barcode</th><th class="num">Qty</th><th class="num">Vendor Price</th><th>Supplier</th><th>Status</th></tr>`;
 
   tr.innerHTML = `
     <td colspan="15">

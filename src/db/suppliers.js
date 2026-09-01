@@ -168,6 +168,8 @@ function deleteSupplier(id) {
   const removeSupplier = db.transaction(() => {
     db.prepare("UPDATE order_meta SET supplier_id = NULL WHERE supplier_id = ?").run(id);
     db.prepare("UPDATE order_line_meta SET supplier_id = NULL WHERE supplier_id = ?").run(id);
+    db.prepare("UPDATE order_items SET supplier_id = NULL WHERE supplier_id = ?").run(id);
+    db.prepare("UPDATE sales SET supplier_id = NULL WHERE supplier_id = ?").run(id);
     db.prepare("DELETE FROM suppliers WHERE id = ?").run(id);
   });
   removeSupplier();

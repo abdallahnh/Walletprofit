@@ -24,6 +24,7 @@
       suppliers: [],
       order_meta: [],
       order_line_meta: [],
+      order_items: [],
       products: [],
       sales: [],
       product_price_history: [],
@@ -44,7 +45,7 @@
     const base = emptyData();
     const data = value && typeof value === "object" ? value : {};
     for (const key of [
-      "transactions", "suppliers", "order_meta", "order_line_meta", "products",
+      "transactions", "suppliers", "order_meta", "order_line_meta", "order_items", "products",
       "sales", "product_price_history", "company_expenses", "config",
     ]) {
       base[key] = Array.isArray(data[key]) ? data[key] : [];

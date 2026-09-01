@@ -75,6 +75,10 @@ function replaceCatalog(products, mappings) {
       if (!normalized.supabase_id || !normalized.barcode || !normalized.item_name.trim()) continue;
       insertProduct.run(normalized);
     }
+    db.prepare(`
+      INSERT INTO config (key, value) VALUES ('productCatalogCacheLastRefreshedAt', ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(new Date().toISOString());
   });
   replace();
   return { products: countProducts(), mappings: countMappings() };
@@ -174,10 +178,17 @@ function countMappings() {
   return Number(getDb().prepare("SELECT COUNT(*) AS count FROM catalog_merchant_supplier_cache").get().count);
 }
 
+function hasSuccessfulRefresh() {
+  return !!getDb().prepare(
+    "SELECT value FROM config WHERE key = 'productCatalogCacheLastRefreshedAt'"
+  ).get()?.value;
+}
+
 module.exports = {
   getMappings,
   getProductByBarcode,
   getProducts,
+  hasSuccessfulRefresh,
   normalizeCatalogProduct,
   replaceCatalog,
   upsertProduct,

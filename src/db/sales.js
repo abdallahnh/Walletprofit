@@ -1,7 +1,8 @@
 const { getDb } = require("./database");
 const { findProductByBarcode } = require("./products");
 const { getWalletConfig, normalizeType } = require("./wallet");
-const { normalizeOrderDetailItems } = require("../services/orderDetailItems");
+const orderItemsDb = require("./orderItems");
+const { upsertAutomaticLineMeta, reconcileOrderMetaFromLines } = require("./orderLineMeta");
 
 function getOrderAdjustmentsUsd(db, orderCode, lbpToUsdRate) {
   if (!orderCode) return { serviceVatUsd: 0, incentiveUsd: 0 };
@@ -68,8 +69,8 @@ function getEffectiveProductCostUsd(db, productId, asOf, fallbackCostUsd) {
 
 function recordOrderItemsToSales(order) {
   const db = getDb();
-  const items = normalizeOrderDetailItems(order.order_detail);
-  if (!items.length) {
+  const orderItems = orderItemsDb.processOrderItems(order);
+  if (!orderItems.length) {
     return {
       order_code: order?.code || null,
       total_items: 0,
@@ -80,147 +81,113 @@ function recordOrderItemsToSales(order) {
     };
   }
 
-  // Get currency conversion rate
   const cfg = getWalletConfig();
-  const usdToLbpRate = cfg?.usdToLbpRate || 90000;
+  const usdToLbpRate = Number(cfg?.usdToLbpRate || 90000);
   const lbpToUsdRate = 1 / usdToLbpRate;
-
-  // Aggregate items by barcode to handle duplicates
-  const aggregatedItems = {};
-  let skippedNoBarcode = 0;
-  let skippedUnmatchedProduct = 0;
-  let matchedItems = 0;
-  for (const d of items) {
-    const item = d.item || {};
-    const barcode = item.barcode;
-    if (!barcode) {
-      skippedNoBarcode += 1;
-      continue;
-    }
-
-    const product = findProductByBarcode(barcode);
-    if (!product) {
-      skippedUnmatchedProduct += 1;
-      continue;
-    }
-    matchedItems += 1;
-
-    const qty = Number(d.quantity || 0);
-    const priceLbp = Number(d.item_price || 0);
-    const priceUsd = priceLbp * lbpToUsdRate; // Convert LBP to USD
-
-    if (aggregatedItems[barcode]) {
-      aggregatedItems[barcode].quantity += qty;
-      // Use the latest price if different
-      if (priceUsd > 0) aggregatedItems[barcode].priceUsd = priceUsd;
-    } else {
-      aggregatedItems[barcode] = {
-        product,
-        quantity: qty,
-        priceUsd: priceUsd
-      };
-    }
-  }
-
   const createdAt = order.created_at || new Date().toISOString();
-  const orderMeta = getOrderMeta(db, order.code);
-  const hasSupplierOverride = Number(orderMeta?.supplier_cost || 0) > 0;
-  const supplierOverrideCostUsd = hasSupplierOverride
-    ? Number(orderMeta.supplier_cost || 0) * lbpToUsdRate
-    : 0;
+  const orderManual = db.prepare(
+    "SELECT * FROM order_meta WHERE order_code=? AND cost_source='manual_override'"
+  ).get(order.code);
   const { serviceVatUsd: orderServiceVatUsd, incentiveUsd: orderIncentiveUsd } =
     getOrderAdjustmentsUsd(db, order.code, lbpToUsdRate);
-  const totalOrderRevenueUsd = Object.values(aggregatedItems).reduce(
-    (sum, it) => sum + Number(it.quantity || 0) * Number(it.priceUsd || 0),
+  const catalogRows = orderItems.filter((item) => item.barcode && item.catalog_product_id);
+  const totalOrderRevenueUsd = catalogRows.reduce(
+    (sum, item) => sum + Number(item.total_selling_price_usd || 0),
     0
   );
 
-  if (Object.keys(aggregatedItems).length === 0) {
+  if (catalogRows.length === 0) {
     return {
       order_code: order?.code || null,
-      total_items: items.length,
-      matched_items: matchedItems,
+      total_items: orderItems.length,
+      matched_items: 0,
       inserted_rows: 0,
-      skipped_no_barcode: skippedNoBarcode,
-      skipped_unmatched_product: skippedUnmatchedProduct,
+      skipped_no_barcode: orderItems.filter((r) => r.catalog_sync_status === "missing_barcode").length,
+      skipped_unmatched_product: orderItems.filter((r) => r.catalog_sync_status === "missing_product").length,
       preserved_existing: true,
     };
   }
 
-  // Keep sync idempotent only after at least one product is ready to replace prior rows.
-  db.prepare("DELETE FROM sales WHERE order_code = ?").run(order.code);
-
-  // Simple insert - let duplicates exist for now
   const insertStmt = db.prepare(
     `
     INSERT INTO sales (
-      order_code,
-      barcode,
-      product_id,
-      quantity,
-      unit_price,
-      cost,
-      total_sale,
-      profit,
-      created_at
+      order_code, barcode, product_id, quantity, unit_price, cost, total_sale, profit, created_at,
+      catalog_product_id, item_name_snapshot, image_url_snapshot,
+      unit_supplier_cost_usd, total_supplier_cost_usd, supplier_id, merchant_code,
+      catalog_sync_status, cost_source, cost_snapshot_at
     )
-    VALUES (?,?,?,?,?,?,?,?,?)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `
   );
 
   let insertedRows = 0;
-  for (const [barcode, data] of Object.entries(aggregatedItems)) {
-    const { product, quantity, priceUsd } = data;
-
-    const grossTotal = quantity * priceUsd;
-    const historicalCostUsd = getEffectiveProductCostUsd(
-      db,
-      product.id,
-      createdAt,
-      product.cost_usd || 0
-    );
-    const defaultCost = historicalCostUsd * quantity;
-    const overrideCost =
-      totalOrderRevenueUsd > 0
-        ? (grossTotal / totalOrderRevenueUsd) * supplierOverrideCostUsd
-        : 0;
-    const cost = hasSupplierOverride ? overrideCost : defaultCost;
+  const insertAll = db.transaction(() => {
+    db.prepare("DELETE FROM sales WHERE order_code = ?").run(order.code);
+    for (const item of catalogRows) {
+      const quantity = Number(item.quantity || 0);
+      const priceUsd = Number(item.unit_selling_price_usd || 0);
+      const grossTotal = Number(item.total_selling_price_usd || quantity * priceUsd);
+      const manual = db.prepare(
+        "SELECT * FROM order_line_meta WHERE order_code=? AND barcode=? AND cost_source='manual_override'"
+      ).get(order.code, item.barcode);
+      const effectiveManual = manual || (catalogRows.length === 1 ? orderManual : null);
+      const hasKnownCost = effectiveManual || item.total_supplier_cost_usd != null;
+      const cost = effectiveManual
+        ? Number(effectiveManual.supplier_cost_lbp ?? effectiveManual.supplier_cost ?? 0) * lbpToUsdRate
+        : hasKnownCost ? Number(item.total_supplier_cost_usd) : null;
+      const supplierId = effectiveManual?.supplier_id || item.supplier_id || null;
+      const costSource = effectiveManual ? "manual_override" : item.cost_source;
+      const unitCost = effectiveManual && quantity > 0 ? cost / quantity : item.unit_supplier_cost_usd;
     const feeShare =
       totalOrderRevenueUsd > 0 ? (grossTotal / totalOrderRevenueUsd) * orderServiceVatUsd : 0;
     const incentiveShare =
       totalOrderRevenueUsd > 0 ? (grossTotal / totalOrderRevenueUsd) * orderIncentiveUsd : 0;
-
-    // Merchant revenue is what remains after platform fees and VAT, plus incentives.
     const merchantRevenue = grossTotal - feeShare + incentiveShare;
-    const profit = merchantRevenue - cost;
-
-    try {
+      const profit = cost == null ? null : merchantRevenue - cost;
+      const localProduct = findProductByBarcode(item.barcode);
       insertStmt.run(
-        order.code,
-        barcode,
-        product.id,
-        quantity,
-        priceUsd,
-        cost,
-        merchantRevenue,
-        profit,
-        createdAt
+        order.code, item.barcode, localProduct?.id || null, quantity, priceUsd, cost,
+        merchantRevenue, profit, createdAt, item.catalog_product_id,
+        item.item_name_snapshot, item.image_url_snapshot, unitCost,
+        cost, supplierId, item.merchant_code, item.catalog_sync_status,
+        costSource, item.cost_snapshot_at
       );
       insertedRows += 1;
-    } catch (e) {
-      // Ignore duplicate errors for now
-      console.log('Ignoring sales insert error:', e.message);
+      if (!effectiveManual && item.catalog_sync_status === "matched") {
+        upsertAutomaticLineMeta({
+          order_code: order.code, barcode: item.barcode, supplier_id: supplierId,
+          supplier_cost_lbp: Number(item.total_supplier_cost_usd) * usdToLbpRate,
+          merchant_code: item.merchant_code,
+        });
+      }
     }
-  }
+    reconcileOrderMetaFromLines(order.code);
+  });
+  insertAll();
 
   return {
     order_code: order?.code || null,
-    total_items: items.length,
-    matched_items: matchedItems,
+    total_items: orderItems.length,
+    matched_items: orderItems.filter((r) => r.catalog_sync_status === "matched").length,
     inserted_rows: insertedRows,
-    skipped_no_barcode: skippedNoBarcode,
-    skipped_unmatched_product: skippedUnmatchedProduct,
+    skipped_no_barcode: orderItems.filter((r) => r.catalog_sync_status === "missing_barcode").length,
+    skipped_unmatched_product: orderItems.filter((r) => r.catalog_sync_status === "missing_product").length,
+    missing_vendor_price: orderItems.filter((r) => r.catalog_sync_status === "missing_vendor_price").length,
   };
+}
+
+function rebuildSalesFromStoredOrderItems(orderCode) {
+  const rows = orderItemsDb.getOrderItems(orderCode);
+  if (!rows.length) return { ok: true, inserted_rows: 0 };
+  return recordOrderItemsToSales({
+    code: orderCode,
+    created_at: rows[0].order_created_at,
+    order_detail: rows.map((row) => ({
+      quantity: row.quantity,
+      item_price: Number(row.unit_selling_price_usd || 0) * Number(getWalletConfig()?.usdToLbpRate || 90000),
+      item: { barcode: row.barcode, item_name: row.item_name_snapshot },
+    })),
+  });
 }
 
 function buildSalesFilter(opts = {}) {
@@ -246,7 +213,7 @@ function buildSalesFilter(opts = {}) {
 
   if (ids.length > 0) {
     joinSql = "LEFT JOIN order_meta om ON om.order_code = s.order_code";
-    where.push(`om.supplier_id IN (${ids.map(() => "?").join(", ")})`);
+    where.push(`COALESCE(s.supplier_id, om.supplier_id) IN (${ids.map(() => "?").join(", ")})`);
     params.push(...ids);
   }
 
@@ -262,18 +229,18 @@ function getSalesReport(opts = {}) {
     .prepare(
       `
     SELECT
-      p.barcode,
-      p.item_name,
+      COALESCE(s.barcode, p.barcode) AS barcode,
+      COALESCE(s.item_name_snapshot, p.item_name, s.barcode) AS item_name,
       p.brand,
       SUM(s.quantity) AS sold_qty,
       SUM(s.total_sale) AS revenue,
       SUM(s.cost) AS supplier_cost,
       SUM(s.profit) AS profit
     FROM sales s
-    JOIN products p ON s.product_id = p.id
+    LEFT JOIN products p ON s.product_id = p.id
     ${joinSql}
     ${whereSql}
-    GROUP BY p.barcode, p.item_name, p.brand
+    GROUP BY COALESCE(s.barcode, p.barcode), COALESCE(s.item_name_snapshot, p.item_name, s.barcode), p.brand
     ORDER BY sold_qty DESC
   `
     )
@@ -347,18 +314,18 @@ function getTopProductsByRevenue(opts = {}) {
     .prepare(
       `
     SELECT
-      p.barcode,
-      p.item_name,
+      COALESCE(s.barcode, p.barcode) AS barcode,
+      COALESCE(s.item_name_snapshot, p.item_name, s.barcode) AS item_name,
       p.brand,
       SUM(s.quantity) AS sold_qty,
       SUM(s.total_sale) AS revenue,
       SUM(s.cost) AS supplier_cost,
       SUM(s.profit) AS profit
     FROM sales s
-    JOIN products p ON s.product_id = p.id
+    LEFT JOIN products p ON s.product_id = p.id
     ${joinSql}
     ${whereSql}
-    GROUP BY p.barcode, p.item_name, p.brand
+    GROUP BY COALESCE(s.barcode, p.barcode), COALESCE(s.item_name_snapshot, p.item_name, s.barcode), p.brand
     ORDER BY revenue DESC
     LIMIT ?
   `
@@ -385,18 +352,18 @@ function getTopProductsByProfit(opts = {}) {
     .prepare(
       `
     SELECT
-      p.barcode,
-      p.item_name,
+      COALESCE(s.barcode, p.barcode) AS barcode,
+      COALESCE(s.item_name_snapshot, p.item_name, s.barcode) AS item_name,
       p.brand,
       SUM(s.quantity) AS sold_qty,
       SUM(s.total_sale) AS revenue,
       SUM(s.cost) AS supplier_cost,
       SUM(s.profit) AS profit
     FROM sales s
-    JOIN products p ON s.product_id = p.id
+    LEFT JOIN products p ON s.product_id = p.id
     ${joinSql}
     ${whereSql}
-    GROUP BY p.barcode, p.item_name, p.brand
+    GROUP BY COALESCE(s.barcode, p.barcode), COALESCE(s.item_name_snapshot, p.item_name, s.barcode), p.brand
     ORDER BY profit DESC
     LIMIT ?
   `
@@ -423,11 +390,11 @@ function getProfitMarginAnalysis(opts = {}) {
     .prepare(
       `
     SELECT
-      p.barcode,
-      p.item_name,
+      COALESCE(s.barcode, p.barcode) AS barcode,
+      COALESCE(s.item_name_snapshot, p.item_name, s.barcode) AS item_name,
       p.brand,
-      p.unit_price_usd,
-      p.cost_usd,
+      AVG(s.unit_price) AS unit_price_usd,
+      AVG(COALESCE(s.unit_supplier_cost_usd, p.cost_usd)) AS cost_usd,
       SUM(s.quantity) AS sold_qty,
       SUM(s.total_sale) AS revenue,
       SUM(s.cost) AS supplier_cost,
@@ -438,10 +405,10 @@ function getProfitMarginAnalysis(opts = {}) {
         ELSE 0 
       END AS profit_margin_percent
     FROM sales s
-    JOIN products p ON s.product_id = p.id
+    LEFT JOIN products p ON s.product_id = p.id
     ${joinSql}
     ${whereSql}
-    GROUP BY p.barcode, p.item_name, p.brand, p.unit_price_usd, p.cost_usd
+    GROUP BY COALESCE(s.barcode, p.barcode), COALESCE(s.item_name_snapshot, p.item_name, s.barcode), p.brand
     HAVING sold_qty > 0
     ORDER BY profit_margin_percent DESC
     LIMIT ?
@@ -524,7 +491,9 @@ function applyOrderSupplierCost(orderCode, supplierCostLbp, usdToLbpRate = 90000
   return { ok: true, affectedRows: rows.length };
 }
 
-function applyLineSupplierCost(orderCode, barcode, supplierCostLbp, usdToLbpRate = 90000) {
+function applyLineSupplierCost(
+  orderCode, barcode, supplierCostLbp, usdToLbpRate = 90000, supplierId = null
+) {
   const db = getDb();
   const code = String(orderCode || "").trim();
   const bc = String(barcode || "").trim();
@@ -533,7 +502,7 @@ function applyLineSupplierCost(orderCode, barcode, supplierCostLbp, usdToLbpRate
   const row = db
     .prepare(
       `
-    SELECT id, total_sale
+    SELECT id, total_sale, quantity
     FROM sales
     WHERE order_code = ? AND barcode = ?
   `
@@ -548,16 +517,22 @@ function applyLineSupplierCost(orderCode, barcode, supplierCostLbp, usdToLbpRate
   db.prepare(
     `
     UPDATE sales
-    SET cost = ?, profit = ?
+    SET cost = ?, profit = ?, unit_supplier_cost_usd = ?,
+        total_supplier_cost_usd = ?, supplier_id = ?, cost_source = 'manual_override',
+        cost_snapshot_at = datetime('now')
     WHERE id = ?
   `
-  ).run(costUsd, profit, row.id);
+  ).run(
+    costUsd, profit, Number(row.quantity || 0) > 0 ? costUsd / Number(row.quantity) : costUsd,
+    costUsd, supplierId ? Number(supplierId) : null, row.id
+  );
 
   return { ok: true, affectedRows: 1 };
 }
 
 module.exports = {
   recordOrderItemsToSales,
+  rebuildSalesFromStoredOrderItems,
   applyOrderSupplierCost,
   applyLineSupplierCost,
   getSalesReport,

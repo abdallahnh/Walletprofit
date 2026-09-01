@@ -71,6 +71,7 @@ contextBridge.exposeInMainWorld("api", {
   catalogGetProductByBarcode: (barcode) => ipcRenderer.invoke("catalog:getProductByBarcode", barcode),
   catalogGetMappings: () => ipcRenderer.invoke("catalog:getMappings"),
   catalogRefreshCache: () => ipcRenderer.invoke("catalog:refreshCache"),
+  catalogRetryOrderItems: () => ipcRenderer.invoke("catalog:retryOrderItems"),
   catalogCreateProduct: (payload) => ipcRenderer.invoke("catalog:createProduct", payload || {}),
   catalogUpdateProduct: (id, updates) => ipcRenderer.invoke("catalog:updateProduct", id, updates || {}),
   catalogArchiveProduct: (id) => ipcRenderer.invoke("catalog:archiveProduct", id),

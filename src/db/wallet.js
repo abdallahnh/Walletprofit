@@ -4,7 +4,7 @@ const Database = require("better-sqlite3");
 const { getDb, getDbPath, replaceDatabaseFromFile } = require("./database");
 const walletSyncState = require("./walletSyncState");
 
-const BACKUP_SCHEMA_VERSION = 4;
+const BACKUP_SCHEMA_VERSION = 5;
 
 function normalizeHttpBaseUrl(value) {
   const url = new URL(String(value || "https://dashboard.toters-api.com").trim());
@@ -406,6 +406,7 @@ function collectBackupData() {
     suppliers: db.prepare("SELECT * FROM suppliers ORDER BY id ASC").all(),
     order_meta: db.prepare("SELECT * FROM order_meta ORDER BY order_code ASC").all(),
     order_line_meta: db.prepare("SELECT * FROM order_line_meta ORDER BY order_code ASC, barcode ASC").all(),
+    order_items: db.prepare("SELECT * FROM order_items ORDER BY order_code ASC, id ASC").all(),
     products: db.prepare("SELECT * FROM products ORDER BY id ASC").all(),
     sales: db.prepare("SELECT * FROM sales ORDER BY id ASC").all(),
     product_price_history: db
@@ -475,6 +476,7 @@ function clearAllData() {
     PRAGMA foreign_keys = OFF;
     DELETE FROM sales;
     DELETE FROM product_price_history;
+    DELETE FROM order_items;
     DELETE FROM order_line_meta;
     DELETE FROM order_meta;
     DELETE FROM transactions;
@@ -495,6 +497,7 @@ function importBackupData(data, { replace = false } = {}) {
   const suppliers = Array.isArray(data.suppliers) ? data.suppliers : [];
   const meta = Array.isArray(data.order_meta) ? data.order_meta : [];
   const lineMeta = Array.isArray(data.order_line_meta) ? data.order_line_meta : [];
+  const orderItems = Array.isArray(data.order_items) ? data.order_items : [];
   const products = Array.isArray(data.products) ? data.products : [];
   const sales = Array.isArray(data.sales) ? data.sales : [];
   const priceHistory = Array.isArray(data.product_price_history)
@@ -522,25 +525,55 @@ function importBackupData(data, { replace = false } = {}) {
   `);
 
   const insertMeta = db.prepare(`
-    INSERT INTO order_meta(order_code, supplier_cost, supplier_paid, supplier_id, has_adjusted_items, adjusted_items_count, updated_at)
-    VALUES(@order_code, @supplier_cost, @supplier_paid, @supplier_id, @has_adjusted_items, @adjusted_items_count, datetime('now'))
+    INSERT INTO order_meta(order_code, supplier_cost, supplier_paid, supplier_id, has_adjusted_items, adjusted_items_count, cost_source, updated_at)
+    VALUES(@order_code, @supplier_cost, @supplier_paid, @supplier_id, @has_adjusted_items, @adjusted_items_count, @cost_source, datetime('now'))
     ON CONFLICT(order_code) DO UPDATE SET
       supplier_cost=excluded.supplier_cost,
       supplier_paid=excluded.supplier_paid,
       supplier_id=excluded.supplier_id,
       has_adjusted_items=excluded.has_adjusted_items,
       adjusted_items_count=excluded.adjusted_items_count,
+      cost_source=excluded.cost_source,
       updated_at=datetime('now')
   `);
 
   const insertLineMeta = db.prepare(`
-    INSERT INTO order_line_meta (order_code, barcode, supplier_id, supplier_cost_lbp, supplier_paid, updated_at)
-    VALUES (@order_code, @barcode, @supplier_id, @supplier_cost_lbp, @supplier_paid, datetime('now'))
+    INSERT INTO order_line_meta (order_code, barcode, supplier_id, supplier_cost_lbp, supplier_paid, cost_source, merchant_code, updated_at)
+    VALUES (@order_code, @barcode, @supplier_id, @supplier_cost_lbp, @supplier_paid, @cost_source, @merchant_code, datetime('now'))
     ON CONFLICT(order_code, barcode) DO UPDATE SET
       supplier_id = excluded.supplier_id,
       supplier_cost_lbp = excluded.supplier_cost_lbp,
       supplier_paid = excluded.supplier_paid,
+      cost_source = excluded.cost_source,
+      merchant_code = excluded.merchant_code,
       updated_at = datetime('now')
+  `);
+
+  const insertOrderItem = db.prepare(`
+    INSERT INTO order_items (
+      id, order_code, line_key, barcode, item_name_snapshot, quantity,
+      unit_selling_price_usd, total_selling_price_usd, catalog_product_id,
+      image_url_snapshot, supplier_id, supplier_key, merchant_code,
+      unit_supplier_cost_usd, total_supplier_cost_usd, cost_source,
+      catalog_sync_status, catalog_error, order_created_at, cost_snapshot_at, updated_at
+    ) VALUES (
+      @id, @order_code, @line_key, @barcode, @item_name_snapshot, @quantity,
+      @unit_selling_price_usd, @total_selling_price_usd, @catalog_product_id,
+      @image_url_snapshot, @supplier_id, @supplier_key, @merchant_code,
+      @unit_supplier_cost_usd, @total_supplier_cost_usd, @cost_source,
+      @catalog_sync_status, @catalog_error, @order_created_at, @cost_snapshot_at, @updated_at
+    )
+    ON CONFLICT(order_code, line_key) DO UPDATE SET
+      barcode=excluded.barcode, item_name_snapshot=excluded.item_name_snapshot,
+      quantity=excluded.quantity, unit_selling_price_usd=excluded.unit_selling_price_usd,
+      total_selling_price_usd=excluded.total_selling_price_usd,
+      catalog_product_id=excluded.catalog_product_id, image_url_snapshot=excluded.image_url_snapshot,
+      supplier_id=excluded.supplier_id, supplier_key=excluded.supplier_key,
+      merchant_code=excluded.merchant_code, unit_supplier_cost_usd=excluded.unit_supplier_cost_usd,
+      total_supplier_cost_usd=excluded.total_supplier_cost_usd, cost_source=excluded.cost_source,
+      catalog_sync_status=excluded.catalog_sync_status, catalog_error=excluded.catalog_error,
+      order_created_at=excluded.order_created_at, cost_snapshot_at=excluded.cost_snapshot_at,
+      updated_at=excluded.updated_at
   `);
 
   const insertProduct = db.prepare(`
@@ -579,12 +612,14 @@ function importBackupData(data, { replace = false } = {}) {
 
   const insertSale = db.prepare(`
     INSERT INTO sales (
-      id, order_code, barcode, product_id, quantity,
-      unit_price, cost, total_sale, profit, created_at
+      id, order_code, barcode, product_id, quantity, unit_price, cost, total_sale, profit, created_at,
+      catalog_product_id, item_name_snapshot, image_url_snapshot, unit_supplier_cost_usd,
+      total_supplier_cost_usd, supplier_id, merchant_code, catalog_sync_status, cost_source, cost_snapshot_at
     )
     VALUES (
-      @id, @order_code, @barcode, @product_id, @quantity,
-      @unit_price, @cost, @total_sale, @profit, @created_at
+      @id, @order_code, @barcode, @product_id, @quantity, @unit_price, @cost, @total_sale, @profit, @created_at,
+      @catalog_product_id, @item_name_snapshot, @image_url_snapshot, @unit_supplier_cost_usd,
+      @total_supplier_cost_usd, @supplier_id, @merchant_code, @catalog_sync_status, @cost_source, @cost_snapshot_at
     )
     ON CONFLICT(id) DO UPDATE SET
       order_code = excluded.order_code,
@@ -595,7 +630,17 @@ function importBackupData(data, { replace = false } = {}) {
       cost = excluded.cost,
       total_sale = excluded.total_sale,
       profit = excluded.profit,
-      created_at = excluded.created_at
+      created_at = excluded.created_at,
+      catalog_product_id = excluded.catalog_product_id,
+      item_name_snapshot = excluded.item_name_snapshot,
+      image_url_snapshot = excluded.image_url_snapshot,
+      unit_supplier_cost_usd = excluded.unit_supplier_cost_usd,
+      total_supplier_cost_usd = excluded.total_supplier_cost_usd,
+      supplier_id = excluded.supplier_id,
+      merchant_code = excluded.merchant_code,
+      catalog_sync_status = excluded.catalog_sync_status,
+      cost_source = excluded.cost_source,
+      cost_snapshot_at = excluded.cost_snapshot_at
   `);
 
   const insertPriceHistory = db.prepare(`
@@ -668,6 +713,7 @@ function importBackupData(data, { replace = false } = {}) {
         supplier_id: m.supplier_id ?? null,
         has_adjusted_items: m.has_adjusted_items ? 1 : 0,
         adjusted_items_count: Math.trunc(m.adjusted_items_count || 0),
+        cost_source: m.cost_source || (Number(m.supplier_cost || 0) > 0 ? "manual_override" : null),
       });
     }
 
@@ -678,6 +724,24 @@ function importBackupData(data, { replace = false } = {}) {
         supplier_id: lm.supplier_id ?? null,
         supplier_cost_lbp: Math.trunc(lm.supplier_cost_lbp || 0),
         supplier_paid: lm.supplier_paid ? 1 : 0,
+        cost_source: lm.cost_source || null,
+        merchant_code: lm.merchant_code || null,
+      });
+    }
+
+    for (const item of orderItems) {
+      insertOrderItem.run({
+        id: item.id, order_code: item.order_code, line_key: item.line_key,
+        barcode: item.barcode || null, item_name_snapshot: item.item_name_snapshot || "Unknown item",
+        quantity: Number(item.quantity || 0), unit_selling_price_usd: item.unit_selling_price_usd ?? null,
+        total_selling_price_usd: item.total_selling_price_usd ?? null,
+        catalog_product_id: item.catalog_product_id || null, image_url_snapshot: item.image_url_snapshot || null,
+        supplier_id: item.supplier_id ?? null, supplier_key: item.supplier_key || null,
+        merchant_code: item.merchant_code || null, unit_supplier_cost_usd: item.unit_supplier_cost_usd ?? null,
+        total_supplier_cost_usd: item.total_supplier_cost_usd ?? null, cost_source: item.cost_source || null,
+        catalog_sync_status: item.catalog_sync_status || "pending", catalog_error: item.catalog_error || null,
+        order_created_at: item.order_created_at || null, cost_snapshot_at: item.cost_snapshot_at || null,
+        updated_at: item.updated_at || new Date().toISOString(),
       });
     }
 
@@ -721,6 +785,16 @@ function importBackupData(data, { replace = false } = {}) {
         total_sale: s.total_sale,
         profit: s.profit,
         created_at: s.created_at,
+        catalog_product_id: s.catalog_product_id || null,
+        item_name_snapshot: s.item_name_snapshot || null,
+        image_url_snapshot: s.image_url_snapshot || null,
+        unit_supplier_cost_usd: s.unit_supplier_cost_usd ?? null,
+        total_supplier_cost_usd: s.total_supplier_cost_usd ?? s.cost ?? null,
+        supplier_id: s.supplier_id ?? null,
+        merchant_code: s.merchant_code || null,
+        catalog_sync_status: s.catalog_sync_status || null,
+        cost_source: s.cost_source || null,
+        cost_snapshot_at: s.cost_snapshot_at || null,
       });
     }
 
@@ -764,6 +838,7 @@ function importBackupData(data, { replace = false } = {}) {
     imported_suppliers: suppliers.length,
     imported_meta: meta.length,
     imported_line_meta: lineMeta.length,
+    imported_order_items: orderItems.length,
     imported_products: products.length,
     imported_sales: sales.length,
     imported_price_history: priceHistory.length,

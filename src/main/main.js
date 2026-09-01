@@ -9,6 +9,7 @@ const walletDb = require("../db/wallet");
 const ordersDb = require("../db/orders");
 const productsDb = require("../db/products");
 const productCatalogCache = require("../db/productCatalogCache");
+const orderItemsDb = require("../db/orderItems");
 const salesDb = require("../db/sales");
 const adminDb = require("../db/admin");
 const suppliersDb = require("../db/suppliers");
@@ -358,7 +359,8 @@ ipcMain.handle("orders:lineMeta:set", async (_evt, payload) => {
       payload?.order_code,
       payload?.barcode,
       payload?.supplier_cost_lbp,
-      usdToLbpRate
+      usdToLbpRate,
+      payload?.supplier_id
     );
   } catch (e) {
     logger.error("Failed to apply line supplier cost on sales row", {
@@ -1031,6 +1033,29 @@ ipcMain.handle("catalog:refreshCache", async () => {
     return { ok: false, error: String(error.message || error) };
   }
 });
+ipcMain.handle("catalog:retryOrderItems", async () => {
+  let refreshWarning = null;
+  try {
+    await productCatalog.refreshCache();
+  } catch (error) {
+    refreshWarning = String(error.message || error);
+  }
+  try {
+    const retry = orderItemsDb.retryPendingItems();
+    const rebuilt = retry.order_codes.map((orderCode) =>
+      salesDb.rebuildSalesFromStoredOrderItems(orderCode)
+    );
+    return {
+      ok: true,
+      attempted: retry.attempted,
+      orders_rebuilt: retry.order_codes.length,
+      inserted_rows: rebuilt.reduce((sum, row) => sum + Number(row.inserted_rows || 0), 0),
+      warning: refreshWarning,
+    };
+  } catch (error) {
+    return { ok: false, error: String(error.message || error), warning: refreshWarning };
+  }
+});
 ipcMain.handle("catalog:createProduct", async (_evt, payload) => {
   try {
     return { ok: true, product: await productCatalog.createProduct(payload || {}) };
@@ -1156,6 +1181,13 @@ ipcMain.handle("sales:syncFromOrders", async () => {
 
   salesOrderSyncRunning = true;
   try {
+    try {
+      await productCatalog.refreshCache();
+    } catch (error) {
+      logger.warn("Product catalog refresh failed; order sync will continue", {
+        error: String(error.message || error),
+      });
+    }
     const result = await runCheckpointedOrderSync(cfg.storeId);
     if (!result.ok) {
       logger.error("Order sync paused at checkpoint", {

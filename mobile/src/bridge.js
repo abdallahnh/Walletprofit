@@ -890,6 +890,7 @@
       const result = await catalogGetProducts({ includeArchived: true });
       return result.source === "supabase" ? { ok: true, products: result.products.length, refreshed_at: new Date().toISOString() } : { ok: false, error: result.warning };
     },
+    catalogRetryOrderItems: async () => ({ ok: false, error: "Retry product matching is available on the desktop app after syncing orders." }),
     catalogCreateProduct: (payload) => catalogMutate("POST", `/rest/v1/products?select=${encodeURIComponent(CATALOG_SELECT)}`, payload || {}),
     catalogUpdateProduct: (id, updates) => catalogMutate("PATCH", `/rest/v1/products?id=eq.${encodeURIComponent(id)}&select=${encodeURIComponent(CATALOG_SELECT)}`, updates || {}),
     catalogArchiveProduct: (id) => catalogMutate("PATCH", `/rest/v1/products?id=eq.${encodeURIComponent(id)}&select=${encodeURIComponent(CATALOG_SELECT)}`, { is_archived: true }),
