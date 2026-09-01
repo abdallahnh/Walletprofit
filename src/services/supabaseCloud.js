@@ -124,6 +124,11 @@ function createSupabaseCloud({ fetchImpl = global.fetch, initialState = {}, onSt
     return Array.isArray(rows) && rows.length ? rows[0] : null;
   }
 
+  async function requestAuthenticated(path, options = {}) {
+    if (!state.session?.access_token) throw new Error("Sign in to cloud first.");
+    return request(path, options);
+  }
+
   async function pushSnapshot(data, expectedRevision) {
     if (!state.session?.user?.id) throw new Error("Sign in to cloud first.");
     const hash = snapshotHash(data);
@@ -177,6 +182,7 @@ function createSupabaseCloud({ fetchImpl = global.fetch, initialState = {}, onSt
     signIn,
     signOut,
     refreshSession,
+    requestAuthenticated,
     getRemoteSnapshot,
     pushSnapshot,
     markPulled,

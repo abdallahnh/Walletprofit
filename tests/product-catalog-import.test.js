@@ -1,7 +1,13 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
+
+const database = require("../src/db/database");
+const catalogCache = require("../src/db/productCatalogCache");
+const walletDb = require("../src/db/wallet");
+const { createProductCatalogService } = require("../src/services/productCatalogService");
 
 const {
   buildImport,
@@ -42,6 +48,15 @@ function makeRow(overrides = {}) {
   };
   return HEADERS.map((header) => values[header] ?? "");
 }
+
+function createDatabase() {
+  database.closeDatabase();
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "wallet-profit-catalog-test-"));
+  database.initDatabase(directory);
+  return database.getDb();
+}
+
+test.afterEach(() => database.closeDatabase());
 
 test("Sheet importer maps the exact SanDisk scenario without trimming its item name", () => {
   const result = buildImport(makeCsv([makeRow()]));
@@ -130,4 +145,88 @@ test("Supabase catalog migration intentionally supports archive instead of delet
   assert.doesNotMatch(migration, /grant\s+delete/i);
   assert.match(migration, /\('B', 'bassam', 'Bassam'\)/);
   assert.match(migration, /\('T', 'ahmad', 'Ahmad'\)/);
+});
+
+test("catalog cache resolves Merchant to the stable supplier mapping", () => {
+  createDatabase();
+  const result = catalogCache.replaceCatalog([
+    {
+      id: "product-1",
+      barcode: "619659052775",
+      item_name: "SanDisk",
+      vendor_price_usd: 5,
+      merchant_code: "B",
+      image_urls: ["https://example.com/sandisk.jpg"],
+      is_available: true,
+      is_archived: false,
+      stock_status: "in_stock",
+      updated_at: "2026-09-01T10:00:00.000Z",
+    },
+  ], [
+    { merchant_code: "B", supplier_key: "bassam", supplier_name: "Bassam" },
+  ]);
+
+  assert.deepEqual(result, { products: 1, mappings: 1 });
+  const product = catalogCache.getProductByBarcode(" 619659052775 ");
+  assert.equal(product.vendor_price_usd, 5);
+  assert.equal(product.supplier_key, "bassam");
+  assert.equal(product.supplier_name, "Bassam");
+  assert.deepEqual(product.image_urls, ["https://example.com/sandisk.jpg"]);
+  assert.equal(product._catalog_source, "cache");
+});
+
+test("catalog cache is explicitly excluded from the shared historical snapshot", () => {
+  createDatabase();
+  catalogCache.replaceCatalog([
+    { id: "product-1", barcode: "ABC", item_name: "Cached product" },
+  ], []);
+  const snapshot = walletDb.collectBackupData();
+  assert.equal(Object.prototype.hasOwnProperty.call(snapshot, "product_catalog_cache"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(snapshot, "catalog_merchant_supplier_cache"), false);
+});
+
+test("catalog service refreshes cache and falls back to it when Supabase is offline", async () => {
+  createDatabase();
+  let offline = false;
+  const cloud = {
+    async requestAuthenticated(pathname) {
+      if (offline) throw new Error("network unavailable");
+      if (pathname.startsWith("/rest/v1/merchant_supplier_mapping?")) {
+        return [{ merchant_code: "B", supplier_key: "bassam", supplier_name: "Bassam" }];
+      }
+      return [{
+        id: "product-1",
+        barcode: "619659052775",
+        item_name: "SanDisk",
+        vendor_price_usd: 5,
+        merchant_code: "B",
+        merchant_supplier_mapping: { supplier_key: "bassam", supplier_name: "Bassam" },
+      }];
+    },
+  };
+  const service = createProductCatalogService({ cloud, cache: catalogCache });
+  const refreshed = await service.refreshCache();
+  assert.equal(refreshed.products, 1);
+
+  offline = true;
+  const product = await service.getProductByBarcode("619659052775");
+  assert.equal(product._catalog_source, "cache");
+  assert.equal(product.vendor_price_usd, 5);
+  assert.match(product._catalog_error, /network unavailable/);
+});
+
+test("catalog service rejects negative price changes before calling Supabase", async () => {
+  createDatabase();
+  let requests = 0;
+  const service = createProductCatalogService({
+    cloud: {
+      async requestAuthenticated() {
+        requests += 1;
+        return [];
+      },
+    },
+    cache: catalogCache,
+  });
+  await assert.rejects(() => service.updateVendorPrice("product-1", -1), /non-negative/);
+  assert.equal(requests, 0);
 });

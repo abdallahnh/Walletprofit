@@ -8,6 +8,7 @@ const database = require("../db/database");
 const walletDb = require("../db/wallet");
 const ordersDb = require("../db/orders");
 const productsDb = require("../db/products");
+const productCatalogCache = require("../db/productCatalogCache");
 const salesDb = require("../db/sales");
 const adminDb = require("../db/admin");
 const suppliersDb = require("../db/suppliers");
@@ -23,8 +24,10 @@ const { syncOrders, loadDetailsByCode } = require("../services/orderService");
 const { runCheckpointedOrderSync } = require("../services/salesOrderSync");
 const { setAuthToken, setBaseUrl } = require("../services/totersApi");
 const { createSupabaseCloud } = require("../services/supabaseCloud");
+const { createProductCatalogService } = require("../services/productCatalogService");
 
 let cloud;
+let productCatalog;
 
 function cloudStatePath() {
   return path.join(app.getPath("userData"), "cloud-session.bin");
@@ -56,6 +59,7 @@ function initializeCloud() {
     initialState: loadCloudState(),
     onStateChange: saveCloudState,
   });
+  productCatalog = createProductCatalogService({ cloud });
 }
 
 async function getCloudStatus({ checkRemote = true } = {}) {
@@ -988,6 +992,83 @@ ipcMain.handle("wallet:getRemainingBalance", () => walletDb.fetchRemainingBalanc
 ipcMain.handle("products:import", (_evt, rows) => productsDb.importProducts(rows));
 ipcMain.handle("products:get", () => productsDb.getProducts());
 ipcMain.handle("products:update", (_evt, barcode, updates) => productsDb.updateProduct(barcode, updates));
+ipcMain.handle("catalog:getProducts", async (_evt, opts) => {
+  try {
+    const products = await productCatalog.getProducts(opts || {});
+    return { ok: true, products, source: "supabase" };
+  } catch (error) {
+    return {
+      ok: true,
+      products: productCatalog.getCachedProducts(opts || {}),
+      source: "cache",
+      warning: String(error.message || error),
+    };
+  }
+});
+ipcMain.handle("catalog:getProductByBarcode", async (_evt, barcode) => {
+  try {
+    return { ok: true, product: await productCatalog.getProductByBarcode(barcode) };
+  } catch (error) {
+    return { ok: false, error: String(error.message || error) };
+  }
+});
+ipcMain.handle("catalog:getMappings", async () => {
+  try {
+    return { ok: true, mappings: await productCatalog.getMappings(), source: "supabase" };
+  } catch (error) {
+    return {
+      ok: true,
+      mappings: productCatalogCache.getMappings(),
+      source: "cache",
+      warning: String(error.message || error),
+    };
+  }
+});
+ipcMain.handle("catalog:refreshCache", async () => {
+  try {
+    return await productCatalog.refreshCache();
+  } catch (error) {
+    return { ok: false, error: String(error.message || error) };
+  }
+});
+ipcMain.handle("catalog:createProduct", async (_evt, payload) => {
+  try {
+    return { ok: true, product: await productCatalog.createProduct(payload || {}) };
+  } catch (error) {
+    return { ok: false, error: String(error.message || error) };
+  }
+});
+ipcMain.handle("catalog:updateProduct", async (_evt, id, updates) => {
+  try {
+    return { ok: true, product: await productCatalog.updateProduct(id, updates || {}) };
+  } catch (error) {
+    return { ok: false, error: String(error.message || error) };
+  }
+});
+ipcMain.handle("catalog:archiveProduct", async (_evt, id) => {
+  try {
+    return { ok: true, product: await productCatalog.archiveProduct(id) };
+  } catch (error) {
+    return { ok: false, error: String(error.message || error) };
+  }
+});
+ipcMain.handle("catalog:restoreProduct", async (_evt, id) => {
+  try {
+    return { ok: true, product: await productCatalog.restoreProduct(id) };
+  } catch (error) {
+    return { ok: false, error: String(error.message || error) };
+  }
+});
+ipcMain.handle("catalog:setStock", async (_evt, id, inStock) => {
+  try {
+    const product = inStock
+      ? await productCatalog.setInStock(id)
+      : await productCatalog.setOutOfStock(id);
+    return { ok: true, product };
+  } catch (error) {
+    return { ok: false, error: String(error.message || error) };
+  }
+});
 ipcMain.handle("products:exportExcel", async () => {
   const rows = productsDb.exportProductsExcel();
 

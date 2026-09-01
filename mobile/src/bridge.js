@@ -48,10 +48,14 @@
   }
 
   async function cacheGet() {
+    return cacheGetKey(DB_KEY);
+  }
+
+  async function cacheGetKey(key) {
     const db = await openCache();
     return new Promise((resolve, reject) => {
       const transaction = db.transaction(DB_STORE, "readonly");
-      const request = transaction.objectStore(DB_STORE).get(DB_KEY);
+      const request = transaction.objectStore(DB_STORE).get(key);
       request.onsuccess = () => resolve(request.result || null);
       request.onerror = () => reject(request.error);
       transaction.oncomplete = () => db.close();
@@ -683,6 +687,62 @@
     return navigate("orderDetails.html");
   }
 
+  const CATALOG_CACHE_KEY = "productCatalogCache";
+  const CATALOG_SELECT = [
+    "id", "barcode", "item_name", "sku", "brand", "category", "sub_category",
+    "description", "model_name", "color", "measurement_unit", "measurement_value",
+    "selling_price_usd", "vendor_price_usd", "merchant_code", "image_url", "image_urls",
+    "stock_quantity", "is_available", "is_archived", "stock_status", "updated_at",
+    "merchant_supplier_mapping(supplier_key,supplier_name)",
+  ].join(",");
+
+  async function catalogCachedProducts() {
+    return (await cacheGetKey(CATALOG_CACHE_KEY).catch(() => null)) || [];
+  }
+
+  async function catalogGetProducts(options) {
+    const opts = options || {};
+    const filters = [`select=${encodeURIComponent(CATALOG_SELECT)}`, "order=item_name.asc"];
+    if (!opts.includeArchived) filters.push("is_archived=eq.false");
+    const term = String(opts.search || "").trim();
+    if (term) {
+      const pattern = encodeURIComponent(`*${term}*`);
+      filters.push(`or=(barcode.ilike.${pattern},item_name.ilike.${pattern},sku.ilike.${pattern},brand.ilike.${pattern})`);
+    }
+    try {
+      const products = await supabaseRequest(`/rest/v1/products?${filters.join("&")}`);
+      await cachePut(CATALOG_CACHE_KEY, products || []);
+      return { ok: true, products: products || [], source: "supabase" };
+    } catch (error) {
+      return {
+        ok: true,
+        products: await catalogCachedProducts(),
+        source: "cache",
+        warning: String(error.message || error),
+      };
+    }
+  }
+
+  async function catalogMutate(method, path, body) {
+    try {
+      const rows = await supabaseRequest(path, {
+        method,
+        prefer: "return=representation",
+        body,
+      });
+      const product = Array.isArray(rows) ? rows[0] : null;
+      if (!product) return { ok: false, error: "Supabase did not return the product" };
+      const cached = await catalogCachedProducts();
+      const index = cached.findIndex((item) => String(item.id) === String(product.id));
+      if (index >= 0) cached[index] = product;
+      else cached.push(product);
+      await cachePut(CATALOG_CACHE_KEY, cached);
+      return { ok: true, product };
+    } catch (error) {
+      return { ok: false, error: String(error.message || error) };
+    }
+  }
+
   const api = {
     importMerge: (text) => importWalletText(text),
     ordersGetReconciliation: async () => { await ready; return Core.computeOrders(data).orders; },
@@ -806,6 +866,35 @@
     productsImportExcel: () => importProductsFile().catch((error) => ({ ok: false, error: String(error.message || error) })),
     productsUpdate: (barcode, updates) => mutate(() => { const product = data.products.find((item) => String(item.barcode) === String(barcode)); if (!product) return { ok: false, error: "Product not found" }; const previousPrice = Number(product.unit_price_usd || 0); const previousCost = Number(product.cost_usd || 0); Object.assign(product, updates, { unit_price_usd: Number(updates.unit_price_usd ?? product.unit_price_usd ?? 0), cost_usd: Number(updates.cost_usd ?? product.cost_usd ?? 0), stock_quantity: Number(updates.stock_quantity ?? product.stock_quantity ?? 0), updated_at: new Date().toISOString() }); if (previousPrice !== product.unit_price_usd || previousCost !== product.cost_usd) data.product_price_history.push({ id: Core.nextId(data.product_price_history), product_id: product.id, barcode: product.barcode, unit_price_usd: product.unit_price_usd, cost_usd: product.cost_usd, effective_at: new Date().toISOString() }); return { ok: true }; }),
     productsExportExcel: async () => { await ready; return exportExcel("products.xlsx", getProducts()); },
+    catalogGetProducts: (opts) => catalogGetProducts(opts),
+    catalogGetProductByBarcode: async (barcode) => {
+      const key = String(barcode || "").trim();
+      if (!key) return { ok: true, product: null };
+      try {
+        const rows = await supabaseRequest(`/rest/v1/products?select=${encodeURIComponent(CATALOG_SELECT)}&barcode=eq.${encodeURIComponent(key)}&limit=1`);
+        return { ok: true, product: rows?.[0] || null };
+      } catch (error) {
+        const product = (await catalogCachedProducts()).find((item) => String(item.barcode) === key) || null;
+        return product ? { ok: true, product, source: "cache", warning: String(error.message || error) } : { ok: false, error: String(error.message || error) };
+      }
+    },
+    catalogGetMappings: async () => {
+      try {
+        const mappings = await supabaseRequest("/rest/v1/merchant_supplier_mapping?select=merchant_code,supplier_key,supplier_name,updated_at&order=merchant_code.asc");
+        return { ok: true, mappings, source: "supabase" };
+      } catch (error) {
+        return { ok: false, error: String(error.message || error), mappings: [] };
+      }
+    },
+    catalogRefreshCache: async () => {
+      const result = await catalogGetProducts({ includeArchived: true });
+      return result.source === "supabase" ? { ok: true, products: result.products.length, refreshed_at: new Date().toISOString() } : { ok: false, error: result.warning };
+    },
+    catalogCreateProduct: (payload) => catalogMutate("POST", `/rest/v1/products?select=${encodeURIComponent(CATALOG_SELECT)}`, payload || {}),
+    catalogUpdateProduct: (id, updates) => catalogMutate("PATCH", `/rest/v1/products?id=eq.${encodeURIComponent(id)}&select=${encodeURIComponent(CATALOG_SELECT)}`, updates || {}),
+    catalogArchiveProduct: (id) => catalogMutate("PATCH", `/rest/v1/products?id=eq.${encodeURIComponent(id)}&select=${encodeURIComponent(CATALOG_SELECT)}`, { is_archived: true }),
+    catalogRestoreProduct: (id) => catalogMutate("PATCH", `/rest/v1/products?id=eq.${encodeURIComponent(id)}&select=${encodeURIComponent(CATALOG_SELECT)}`, { is_archived: false }),
+    catalogSetStock: (id, inStock) => catalogMutate("PATCH", `/rest/v1/products?id=eq.${encodeURIComponent(id)}&select=${encodeURIComponent(CATALOG_SELECT)}`, { is_available: !!inStock, stock_status: inStock ? "in_stock" : "out_of_stock" }),
     salesReport: async (opts) => { await ready; return Core.salesReport(data, opts); },
     salesRevenueByPeriod: async (opts) => { await ready; return Core.salesRevenueByPeriod(data, opts); },
     walletRevenueByPeriod: async (opts) => { await ready; return Core.walletRevenueByPeriod(data, opts); },

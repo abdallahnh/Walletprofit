@@ -67,6 +67,15 @@ contextBridge.exposeInMainWorld("api", {
   productsImportExcel: () => ipcRenderer.invoke("products:importExcel"),
   productsUpdate: (barcode, updates) => ipcRenderer.invoke("products:update", barcode, updates),
   productsExportExcel: () => ipcRenderer.invoke("products:exportExcel"),
+  catalogGetProducts: (opts) => ipcRenderer.invoke("catalog:getProducts", opts || {}),
+  catalogGetProductByBarcode: (barcode) => ipcRenderer.invoke("catalog:getProductByBarcode", barcode),
+  catalogGetMappings: () => ipcRenderer.invoke("catalog:getMappings"),
+  catalogRefreshCache: () => ipcRenderer.invoke("catalog:refreshCache"),
+  catalogCreateProduct: (payload) => ipcRenderer.invoke("catalog:createProduct", payload || {}),
+  catalogUpdateProduct: (id, updates) => ipcRenderer.invoke("catalog:updateProduct", id, updates || {}),
+  catalogArchiveProduct: (id) => ipcRenderer.invoke("catalog:archiveProduct", id),
+  catalogRestoreProduct: (id) => ipcRenderer.invoke("catalog:restoreProduct", id),
+  catalogSetStock: (id, inStock) => ipcRenderer.invoke("catalog:setStock", id, !!inStock),
 
   // Sales reports
   salesReport: (opts) => ipcRenderer.invoke("sales:report", opts || {}),

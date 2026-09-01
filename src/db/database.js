@@ -118,6 +118,7 @@ function initDatabase(userDataPath) {
   ensurePriceHistory(db);
   ensureCompanyExpensesTable(db);
   ensureOrderLineMetaTable(db);
+  ensureProductCatalogCacheTables(db);
 
   // Ensure a default wallet config row exists
   const existing = db.prepare("SELECT value FROM config WHERE key=?").get("walletConfig");
@@ -315,6 +316,53 @@ function ensurePriceHistory(dbConn) {
       FROM product_price_history h
       WHERE h.product_id = p.id
     )
+  `);
+}
+
+function ensureProductCatalogCacheTables(dbConn) {
+  dbConn.exec(`
+    CREATE TABLE IF NOT EXISTS product_catalog_cache (
+      supabase_id TEXT PRIMARY KEY,
+      barcode TEXT NOT NULL UNIQUE,
+      item_name TEXT NOT NULL,
+      sku TEXT,
+      brand TEXT,
+      category TEXT,
+      sub_category TEXT,
+      description TEXT,
+      model_name TEXT,
+      color TEXT,
+      measurement_unit TEXT,
+      measurement_value TEXT,
+      selling_price_usd REAL,
+      vendor_price_usd REAL,
+      merchant_code TEXT,
+      supplier_key TEXT,
+      supplier_name TEXT,
+      image_url TEXT,
+      image_urls_json TEXT DEFAULT '[]',
+      stock_quantity REAL,
+      is_available INTEGER NOT NULL DEFAULT 1,
+      is_archived INTEGER NOT NULL DEFAULT 0,
+      stock_status TEXT NOT NULL DEFAULT 'in_stock',
+      supabase_updated_at TEXT,
+      cached_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_product_catalog_cache_name
+      ON product_catalog_cache(item_name COLLATE NOCASE);
+    CREATE INDEX IF NOT EXISTS idx_product_catalog_cache_merchant
+      ON product_catalog_cache(merchant_code);
+    CREATE INDEX IF NOT EXISTS idx_product_catalog_cache_supplier
+      ON product_catalog_cache(supplier_key);
+
+    CREATE TABLE IF NOT EXISTS catalog_merchant_supplier_cache (
+      merchant_code TEXT PRIMARY KEY,
+      supplier_key TEXT NOT NULL,
+      supplier_name TEXT NOT NULL,
+      supabase_updated_at TEXT,
+      cached_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 }
 
