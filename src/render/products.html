@@ -1,402 +1,84 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Products Management</title>
-
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Products</title>
 <style>
-body {
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-  margin: 16px;
-  background: #fff;
-}
-
-h1 {
-  font-size: 18px;
-  margin: 0 0 8px;
-}
-
-.muted {
-  color:#666;
-  font-size:12px;
-  margin-bottom:10px;
-}
-
-.row {
-  display:flex;
-  gap:10px;
-  flex-wrap:wrap;
-  margin:10px 0 12px;
-  align-items:center;
-}
-
-button {
-  padding: 10px 14px;
-  border: 0;
-  border-radius: 10px;
-  cursor: pointer;
-  font-size: 12px;
-}
-
-.primary {
-  background:#111;
-  color:#fff;
-}
-
-.secondary {
-  background:#eee;
-}
-
-.wrap {
-  overflow:auto;
-  max-height: calc(100vh - 200px);
-  border:1px solid #eee;
-  border-radius: 12px;
-}
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-  table-layout: fixed;
-}
-
-th, td {
-  border-bottom: 1px solid #e6e6e6;
-  padding: 8px 4px;
-  font-size: 12px;
-  text-align: left;
-  vertical-align: middle;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-th {
-  position: sticky;
-  top: 0;
-  background: #fafafa;
-  z-index: 2;
-  font-weight: 600;
-}
-
-td.num, th.num {
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-
-td.input-cell {
-  padding: 4px 2px;
-}
-
-.inp {
-  width: 100%;
-  max-width: 85px;
-  padding:4px 6px;
-  border:1px solid #ddd;
-  border-radius:6px;
-  font-family: ui-monospace, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
-  text-align: center;
-  box-sizing: border-box;
-  margin: 0 auto;
-  display: block;
-}
-
-.save-btn {
-  padding: 4px 8px;
-  border-radius: 6px;
-  background: #28a745;
-  color: white;
-  border: none;
-  cursor: pointer;
-  font-size: 11px;
-}
-
-.save-btn:hover {
-  background: #218838;
-}
-
-.edit-mode {
-  background: #fff3cd;
-}
-
-.success-msg {
-  color: #28a745;
-  font-size: 12px;
-  margin-top: 8px;
-}
-
-.error-msg {
-  color: #dc3545;
-  font-size: 12px;
-  margin-top: 8px;
-}
-
-.loading {
-  opacity: 0.6;
-  pointer-events: none;
-}
+:root{--bg:#f5f7fb;--card:#fff;--text:#182230;--muted:#667085;--line:#e4e7ec;--primary:#1769e0;--danger:#b42318;--success:#067647}
+*{box-sizing:border-box}body{margin:0;padding:18px;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+button,input,select,textarea{font:inherit}button{cursor:pointer;border:1px solid var(--line);border-radius:9px;padding:8px 11px;background:#fff;color:var(--text)}
+button.primary{background:var(--primary);color:#fff;border-color:var(--primary)}button.danger{color:var(--danger)}button.success{color:var(--success)}button.small{padding:6px 8px;font-size:12px}button:disabled{opacity:.55;cursor:wait}
+.page-header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:14px}h1{margin:0;font-size:24px}.subtitle{color:var(--muted);font-size:13px;margin-top:4px}
+.header-actions,.toolbar,.filters,.modal-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.panel{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 1px 2px #1018280a}
+.controls{padding:12px;margin-bottom:12px}.search{flex:1 1 260px;min-width:180px}input,select,textarea{min-height:36px;border:1px solid #d0d5dd;border-radius:8px;padding:7px 9px;background:#fff;color:var(--text)}
+textarea{min-height:82px;resize:vertical}.filters{margin-top:10px}.filters select{min-width:130px;max-width:190px}.check{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:13px}.check input{min-height:auto}
+.status{min-height:20px;margin:7px 2px 10px;color:var(--muted);font-size:13px}.status.error{color:var(--danger)}.status.success{color:var(--success)}
+.table-wrap{overflow:auto;max-height:calc(100vh - 235px)}table{width:100%;min-width:1450px;border-collapse:collapse}th,td{border-bottom:1px solid var(--line);padding:9px 8px;text-align:left;vertical-align:middle;font-size:12px}
+th{position:sticky;top:0;z-index:2;background:#f9fafb;color:#475467;font-weight:650;white-space:nowrap}.product-name{min-width:210px;max-width:300px;white-space:normal;font-weight:600}.barcode{font-family:ui-monospace,Menlo,monospace;white-space:nowrap}
+.thumb-wrap{width:58px;height:58px;border-radius:10px;overflow:hidden;background:#f2f4f7;display:grid;place-items:center;color:#98a2b3;font-size:9px;text-align:center}.thumb{width:100%;height:100%;object-fit:contain;display:block}
+.price-input{width:82px;min-height:32px;text-align:right}.price-cell{white-space:nowrap}.badge{display:inline-flex;border-radius:999px;padding:3px 7px;background:#f2f4f7;white-space:nowrap}.badge.good{color:var(--success);background:#ecfdf3}.badge.bad{color:var(--danger);background:#fef3f2}.badge.archived{color:#475467;background:#eaecf0}
+.actions{display:flex;gap:5px;flex-wrap:wrap;min-width:190px}.empty{padding:34px;text-align:center;color:var(--muted)}details.legacy{margin-top:12px;color:var(--muted);font-size:12px}details.legacy .toolbar{padding-top:8px}
+.modal-backdrop{position:fixed;inset:0;background:#1018288c;z-index:20}.modal{position:fixed;z-index:21;left:50%;top:50%;transform:translate(-50%,-50%);width:min(720px,calc(100vw - 28px));max-height:calc(100vh - 28px);overflow:auto;background:#fff;border-radius:16px;padding:18px;box-shadow:0 24px 48px #10182840}
+.hidden{display:none!important}.modal h2{margin:0 0 14px;font-size:19px}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px}.field{display:flex;flex-direction:column;gap:5px;font-size:12px;color:#475467}.field.full{grid-column:1/-1}.modal-actions{justify-content:flex-end;margin-top:16px}
+@media(max-width:720px){body{padding:max(10px,env(safe-area-inset-top)) 10px max(14px,env(safe-area-inset-bottom))}.page-header{display:block}.header-actions{margin-top:10px}.header-actions button{flex:1}.filters select{flex:1 1 45%;max-width:none;min-width:0}.table-wrap{overflow:visible;max-height:none;background:transparent;border:0;box-shadow:none}table,tbody{display:block;min-width:0}thead{display:none}tr{display:grid;grid-template-columns:70px 1fr;gap:5px 10px;margin-bottom:11px;padding:12px;background:#fff;border:1px solid var(--line);border-radius:13px}td{display:block;border:0;padding:2px 0;grid-column:2;font-size:13px;min-width:0}td:before{content:attr(data-label);display:block;color:var(--muted);font-size:10px;margin-bottom:1px}td.image-cell{grid-column:1;grid-row:1/span 4}td.image-cell:before{display:none}.thumb-wrap{width:70px;height:70px}.product-name{min-width:0;max-width:none}td.optional-mobile{display:none}td.actions-cell{grid-column:1/-1;margin-top:7px}td.actions-cell:before{display:none}.actions button{flex:1;min-width:90px}.form-grid{grid-template-columns:1fr}.field.full{grid-column:auto}}
 </style>
-
 </head>
-
 <body>
-
-<h1>Products Management</h1>
-<div class="muted">Manage product prices, costs, and stock levels</div>
-
-<div class="row">
-  <input id="inpSearch" type="text" class="inp" style="max-width:300px" placeholder="Search barcode, name, category..." />
-
-  <button id="btnImportProducts" class="primary">
-    Import Products Excel
-  </button>
-
-  <button id="btnExportProducts" class="secondary">
-    Export Products Excel
-  </button>
-
-  <button id="btnReload" class="secondary">
-    Reload
-  </button>
-</div>
-
-<div id="messages"></div>
-
-<div class="wrap">
-<table>
-<thead>
-<tr>
-  <th style="width:120px">Barcode</th>
-  <th>Product Name</th>
-  <th style="width:100px">Category</th>
-  <th style="width:180px">Image URL</th>
-  <th class="num" style="width:110px">Price (USD)</th>
-  <th class="num" style="width:110px">Cost (USD)</th>
-  <th class="num" style="width:90px">Stock</th>
-  <th style="width:80px">Actions</th>
-</tr>
-</thead>
-<tbody id="tbody"></tbody>
-</table>
-</div>
-
+<div class="page-header"><div><h1>Products</h1><div class="subtitle">Central Supabase catalog · financial history remains in local sales snapshots</div></div><div class="header-actions"><button id="btnRefresh">Refresh Catalog</button><button id="btnNew" class="primary">New Product</button></div></div>
+<section class="panel controls"><div class="toolbar"><input id="search" class="search" type="search" placeholder="Search barcode, item name, SKU, or brand"><span id="count" class="subtitle"></span></div><div class="filters">
+<select id="filterSupplier"><option value="">All suppliers</option></select><select id="filterMerchant"><option value="">All merchants</option></select><select id="filterBrand"><option value="">All brands</option></select><select id="filterCategory"><option value="">All categories</option></select>
+<select id="filterAvailability"><option value="">All availability</option><option value="available">Available</option><option value="out">Out of stock</option></select><label class="check"><input id="showArchived" type="checkbox"> Show archived</label></div></section>
+<div id="status" class="status">Loading product catalog…</div>
+<section class="panel table-wrap"><table><thead><tr><th>Image</th><th>Barcode</th><th>Item Name</th><th>SKU</th><th>Brand</th><th>Category</th><th>Selling</th><th>Vendor</th><th>Merchant</th><th>Supplier</th><th>Availability</th><th>Archived</th><th>Updated</th><th>Actions</th></tr></thead><tbody id="tbody"></tbody></table><div id="empty" class="empty hidden">No products match these filters.</div></section>
+<details class="legacy"><summary>Legacy local SQLite product tools</summary><div class="toolbar"><button id="btnLegacyImport">Import legacy Excel</button><button id="btnLegacyExport">Export legacy Excel</button><span>Preserved for older data workflows; normal catalog editing now uses Supabase.</span></div></details>
+<div id="backdrop" class="modal-backdrop hidden"></div>
+<section id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><h2 id="modalTitle">Edit Product</h2><form id="productForm"><div class="form-grid">
+<label class="field"><span>Barcode</span><input id="editBarcode" required></label><label class="field"><span>Item Name</span><input id="editName" required></label><label class="field"><span>SKU</span><input id="editSku"></label><label class="field"><span>Brand</span><input id="editBrand"></label>
+<label class="field"><span>Category</span><input id="editCategory"></label><label class="field"><span>Subcategory</span><input id="editSubcategory"></label><label class="field"><span>Selling Price USD</span><input id="editSelling" type="number" min="0" step="0.01"></label><label class="field"><span>Vendor Price USD</span><input id="editVendor" type="number" min="0" step="0.01"></label>
+<label class="field"><span>Merchant / Supplier</span><select id="editMerchant"><option value="">Unassigned</option></select></label><label class="field"><span>Image URL</span><input id="editImage" type="url"></label><label class="field full"><span>Description</span><textarea id="editDescription"></textarea></label>
+</div><div class="modal-actions"><button id="btnCancel" type="button">Cancel</button><button id="btnSave" type="submit" class="primary">Save Product</button></div></form></section>
 <script>
-
-let products = [];
-let filteredProducts = [];
-
-function getSearchQuery() {
-  return (document.getElementById("inpSearch").value || "").trim().toLowerCase();
+"use strict";
+const $=id=>document.getElementById(id);let products=[],mappings=[],editingProduct=null;
+function esc(v){return String(v==null?"":v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
+function safeImageUrl(v){try{const u=new URL(String(v||""));if(!["http:","https:"].includes(u.protocol))return"";if(u.hostname==="drive.google.com"){const m=u.pathname.match(/\/file\/d\/([^/]+)/);if(m)return"https://drive.google.com/uc?export=view&id="+encodeURIComponent(m[1])}return u.toString()}catch{return""}}
+function mappingFor(p){const e=p.merchant_supplier_mapping;if(e&&!Array.isArray(e))return e;return mappings.find(m=>m.merchant_code===p.merchant_code)||{supplier_key:p.supplier_key||"",supplier_name:p.supplier_name||""}}
+function setStatus(msg,kind){$("status").textContent=msg||"";$("status").className="status"+(kind?" "+kind:"")}
+function price(v){return v==null||v===""?"":Number(v).toFixed(2)}
+function values(field){return[...new Set(products.map(p=>String(p[field]||"").trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b))}
+function fill(id,list,label){const s=$(id),current=s.value;s.innerHTML='<option value="">'+esc(label)+"</option>"+list.map(v=>'<option value="'+esc(v)+'">'+esc(v)+"</option>").join("");s.value=current}
+function rebuildFilters(){
+ fill("filterBrand",values("brand"),"All brands");fill("filterCategory",values("category"),"All categories");fill("filterMerchant",values("merchant_code"),"All merchants");
+ const keys=[...new Set(products.map(p=>mappingFor(p).supplier_key).filter(Boolean))].sort(),s=$("filterSupplier"),current=s.value;
+ s.innerHTML='<option value="">All suppliers</option>'+keys.map(key=>{const p=products.find(x=>mappingFor(x).supplier_key===key);return'<option value="'+esc(key)+'">'+esc(mappingFor(p).supplier_name||key)+"</option>"}).join("");s.value=current;
+ $("editMerchant").innerHTML='<option value="">Unassigned</option>'+mappings.map(m=>'<option value="'+esc(m.merchant_code)+'">'+esc(m.merchant_code+" — "+m.supplier_name)+"</option>").join("")
 }
-
-function applyProductFilter() {
-  const q = getSearchQuery();
-  if (!q) {
-    filteredProducts = [...products];
-    return;
-  }
-  filteredProducts = products.filter((p) =>
-    String(p.barcode || "").toLowerCase().includes(q) ||
-    String(p.item_name || "").toLowerCase().includes(q) ||
-    String(p.category || "").toLowerCase().includes(q) ||
-    String(p.brand || "").toLowerCase().includes(q)
-  );
+function filtered(){
+ const q=$("search").value.trim().toLowerCase(),supplier=$("filterSupplier").value,merchant=$("filterMerchant").value,brand=$("filterBrand").value,category=$("filterCategory").value,availability=$("filterAvailability").value,showArchived=$("showArchived").checked;
+ return products.filter(p=>{const hay=[p.barcode,p.item_name,p.sku,p.brand].join(" ").toLowerCase(),available=p.is_available!==false&&p.stock_status!=="out_of_stock";if(q&&!hay.includes(q))return false;if(supplier&&mappingFor(p).supplier_key!==supplier)return false;if(merchant&&p.merchant_code!==merchant)return false;if(brand&&p.brand!==brand)return false;if(category&&p.category!==category)return false;if(availability==="available"&&!available)return false;if(availability==="out"&&available)return false;if(!showArchived&&p.is_archived)return false;return true})
 }
-
-async function loadProducts(){
-  try {
-    products = await window.api.productsGet();
-    applyProductFilter();
-    renderProducts();
-  } catch (e) {
-    showMessage('Error loading products: ' + e.message, 'error');
-  }
+function imageHtml(p){const u=safeImageUrl(p.image_url);return u?'<div class="thumb-wrap"><img class="thumb" src="'+esc(u)+'" alt="" loading="lazy" referrerpolicy="no-referrer"></div>':'<div class="thumb-wrap">No image</div>'}
+function row(p){const m=mappingFor(p),available=p.is_available!==false&&p.stock_status!=="out_of_stock",archived=!!p.is_archived,id=esc(p.id);
+ return'<tr data-id="'+id+'"><td class="image-cell" data-label="Image">'+imageHtml(p)+'</td><td class="barcode" data-label="Barcode">'+esc(p.barcode)+'</td><td class="product-name" data-label="Item Name">'+esc(p.item_name)+'</td><td class="optional-mobile" data-label="SKU">'+esc(p.sku)+'</td><td class="optional-mobile" data-label="Brand">'+esc(p.brand)+'</td><td class="optional-mobile" data-label="Category">'+esc(p.category)+'</td>'+
+ '<td class="price-cell" data-label="Selling"><input class="price-input selling" type="number" min="0" step="0.01" value="'+esc(price(p.selling_price_usd))+'"></td><td class="price-cell" data-label="Vendor"><input class="price-input vendor" type="number" min="0" step="0.01" value="'+esc(price(p.vendor_price_usd))+'"></td>'+
+ '<td data-label="Merchant">'+esc(p.merchant_code||"—")+'</td><td data-label="Supplier">'+esc(m.supplier_name||"Unassigned")+'</td><td data-label="Availability"><span class="badge '+(available?"good":"bad")+'">'+(available?"In stock":"Out of stock")+'</span></td><td data-label="Archived">'+(archived?'<span class="badge archived">Archived</span>':"No")+'</td><td class="optional-mobile" data-label="Updated">'+esc(p.updated_at?new Date(p.updated_at).toLocaleString():"—")+'</td>'+
+ '<td class="actions-cell"><div class="actions"><button class="small save-prices" data-id="'+id+'">Save prices</button><button class="small edit" data-id="'+id+'">Edit</button><button class="small stock '+(available?"danger":"success")+'" data-id="'+id+'" data-in-stock="'+(!available)+'">'+(available?"Set out":"Set in")+'</button><button class="small archive '+(archived?"success":"danger")+'" data-id="'+id+'" data-restore="'+archived+'">'+(archived?"Restore":"Archive")+"</button></div></td></tr>"
 }
-
-function renderProducts(){
-  const tbody = document.getElementById("tbody");
-  tbody.innerHTML = "";
-
-  filteredProducts.forEach(p => {
-    const tr = document.createElement("tr");
-    const barcode = String(p.barcode || "");
-    tr.dataset.barcode = barcode;
-
-    const isEditing = tr.classList.contains('edit-mode');
-
-    tr.innerHTML = `
-      <td>${escapeHtml(barcode)}</td>
-      <td>${escapeHtml(p.item_name || "")}</td>
-      <td>${escapeHtml(p.category || "")}</td>
-      <td title="${escapeHtml(p.image_url || "")}">
-        ${safeHttpUrl(p.image_url)
-          ? `<a href="${escapeHtml(safeHttpUrl(p.image_url))}" target="_blank" rel="noopener noreferrer">Open image</a>`
-          : ""}
-      </td>
-      <td class="num input-cell">
-        <input type="number" step="0.01" class="inp price-input"
-               value="${(p.unit_price_usd != null ? p.unit_price_usd : 0).toFixed(2)}"
-               data-original="${p.unit_price_usd != null ? p.unit_price_usd : 0}">
-      </td>
-      <td class="num input-cell">
-        <input type="number" step="0.01" class="inp cost-input"
-               value="${(p.cost_usd != null ? p.cost_usd : 0).toFixed(2)}"
-               data-original="${p.cost_usd != null ? p.cost_usd : 0}">
-      </td>
-      <td class="num input-cell">
-        <input type="number" class="inp stock-input"
-               value="${p.stock_quantity != null ? p.stock_quantity : 0}"
-               data-original="${p.stock_quantity != null ? p.stock_quantity : 0}">
-      </td>
-      <td>
-        <button class="save-btn" type="button">Save</button>
-      </td>
-    `;
-
-    tbody.appendChild(tr);
-    tr.querySelector(".save-btn").addEventListener("click", () => saveProduct(barcode));
-  });
-}
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function safeHttpUrl(value) {
-  try {
-    const url = new URL(String(value || ""));
-    return ["http:", "https:"].includes(url.protocol) ? url.toString() : "";
-  } catch {
-    return "";
-  }
-}
-
-async function saveProduct(barcode) {
-  const tr = document.querySelector(`tr[data-barcode="${CSS.escape(barcode)}"]`);
-  if (!tr) return;
-
-  const priceInput = tr.querySelector('.price-input');
-  const costInput = tr.querySelector('.cost-input');
-  const stockInput = tr.querySelector('.stock-input');
-  const saveBtn = tr.querySelector('.save-btn');
-
-  const updates = {};
-
-  const newPrice = parseFloat(priceInput.value);
-  const origPrice = parseFloat(priceInput.dataset.original);
-  if (newPrice !== origPrice) {
-    updates.unit_price_usd = newPrice;
-  }
-
-  const newCost = parseFloat(costInput.value);
-  const origCost = parseFloat(costInput.dataset.original);
-  if (newCost !== origCost) {
-    updates.cost_usd = newCost;
-  }
-
-  const newStock = parseInt(stockInput.value);
-  const origStock = parseInt(stockInput.dataset.original);
-  if (newStock !== origStock) {
-    updates.stock_quantity = newStock;
-  }
-
-  if (Object.keys(updates).length === 0) {
-    showMessage('No changes to save', 'error');
-    return;
-  }
-
-  // Disable UI during save
-  tr.classList.add('loading');
-  saveBtn.disabled = true;
-  saveBtn.textContent = 'Saving...';
-
-  try {
-    const result = await window.api.productsUpdate(barcode, updates);
-
-    if (result.ok) {
-      // Update the original values
-      priceInput.dataset.original = newPrice;
-      costInput.dataset.original = newCost;
-      stockInput.dataset.original = newStock;
-
-      showMessage(`Product ${barcode} updated successfully`, 'success');
-    } else {
-      showMessage('Failed to update product: ' + (result.error || 'Unknown error'), 'error');
-    }
-  } catch (e) {
-    showMessage('Error updating product: ' + e.message, 'error');
-  } finally {
-    tr.classList.remove('loading');
-    saveBtn.disabled = false;
-    saveBtn.textContent = 'Save';
-  }
-}
-
-function showMessage(text, type) {
-  const messages = document.getElementById('messages');
-  messages.replaceChildren();
-  const message = document.createElement("div");
-  message.className = type === "success" ? "success-msg" : "error-msg";
-  message.textContent = String(text || "");
-  messages.appendChild(message);
-
-  // Auto-clear success messages after 3 seconds
-  if (type === 'success') {
-    setTimeout(() => {
-      messages.innerHTML = '';
-    }, 3000);
-  }
-}
-
-document.getElementById("btnReload").addEventListener("click", loadProducts);
-document.getElementById("inpSearch").addEventListener("input", () => {
-  applyProductFilter();
-  renderProducts();
-});
-
-document.getElementById("btnImportProducts").addEventListener("click", async() => {
-  try {
-    const result = await window.api.productsImportExcel();
-
-    if (!result) return;
-
-    if (result.ok) {
-      showMessage(`Imported ${result.count} products successfully`, 'success');
-      loadProducts();
-    } else {
-      showMessage('Import failed: ' + (result.error || 'Unknown error'), 'error');
-    }
-  } catch (e) {
-    showMessage('Import error: ' + e.message, 'error');
-  }
-});
-
-document.getElementById("btnExportProducts").addEventListener("click", async() => {
-  try {
-    const result = await window.api.productsExportExcel();
-
-    if (!result) return;
-
-    if (result.ok) {
-      showMessage(`Exported ${result.rows} products to: ${result.path}`, 'success');
-    } else if (result.canceled) {
-      showMessage('Export canceled', 'error');
-    } else {
-      showMessage('Export failed: ' + (result.error || 'Unknown error'), 'error');
-    }
-  } catch (e) {
-    showMessage('Export error: ' + e.message, 'error');
-  }
-});
-
-loadProducts();
-
+function render(){const rows=filtered();$("tbody").innerHTML=rows.map(row).join("");$("empty").classList.toggle("hidden",rows.length>0);$("count").textContent=rows.length+" of "+products.length+" products"}
+async function loadCatalog(message){setStatus(message||"Loading product catalog…");const results=await Promise.all([window.api.catalogGetProducts({includeArchived:true}),window.api.catalogGetMappings()]),catalog=results[0],mapResult=results[1];if(!catalog||catalog.ok===false){setStatus(catalog&&catalog.error||"Could not load product catalog","error");return}products=catalog.products||[];mappings=mapResult&&mapResult.mappings||[];rebuildFilters();render();const warning=catalog.warning||mapResult&&mapResult.warning;setStatus(warning?"Showing offline catalog cache. "+warning:"Catalog loaded from "+(catalog.source||"supabase")+".",warning?"":"success")}
+function openModal(p){editingProduct=p||null;$("modalTitle").textContent=p?"Edit Product":"New Product";$("editBarcode").value=p&&p.barcode||"";$("editBarcode").disabled=!!p;$("editName").value=p&&p.item_name||"";$("editSku").value=p&&p.sku||"";$("editBrand").value=p&&p.brand||"";$("editCategory").value=p&&p.category||"";$("editSubcategory").value=p&&p.sub_category||"";$("editSelling").value=p?price(p.selling_price_usd):"";$("editVendor").value=p?price(p.vendor_price_usd):"";$("editMerchant").value=p&&p.merchant_code||"";$("editImage").value=p&&p.image_url||"";$("editDescription").value=p&&p.description||"";$("backdrop").classList.remove("hidden");$("modal").classList.remove("hidden")}
+function closeModal(){editingProduct=null;$("backdrop").classList.add("hidden");$("modal").classList.add("hidden")}
+function payload(){const selling=$("editSelling").value,vendor=$("editVendor").value;if(selling!==""&&Number(selling)<0||vendor!==""&&Number(vendor)<0)throw new Error("Prices cannot be negative");return{barcode:$("editBarcode").value.trim(),item_name:$("editName").value,sku:$("editSku").value.trim()||null,brand:$("editBrand").value.trim()||null,category:$("editCategory").value.trim()||null,sub_category:$("editSubcategory").value.trim()||null,selling_price_usd:selling===""?null:Number(selling),vendor_price_usd:vendor===""?null:Number(vendor),merchant_code:$("editMerchant").value||null,image_url:$("editImage").value.trim()||null,description:$("editDescription").value||null}}
+$("productForm").addEventListener("submit",async e=>{e.preventDefault();const b=$("btnSave");b.disabled=true;try{const data=payload(),result=editingProduct?await window.api.catalogUpdateProduct(editingProduct.id,data):await window.api.catalogCreateProduct(data);if(!result||result.ok===false)throw new Error(result&&result.error||"Save failed");closeModal();await loadCatalog("Reloading saved product…");setStatus("Product saved successfully.","success")}catch(error){setStatus(String(error.message||error),"error")}finally{b.disabled=false}})
+$("tbody").addEventListener("click",async e=>{const b=e.target.closest("button");if(!b)return;const p=products.find(x=>String(x.id)===String(b.dataset.id));if(!p)return;b.disabled=true;try{let result;if(b.classList.contains("edit")){openModal(p);return}if(b.classList.contains("save-prices")){const tr=b.closest("tr"),selling=tr.querySelector(".selling").value,vendor=tr.querySelector(".vendor").value;if(selling!==""&&Number(selling)<0||vendor!==""&&Number(vendor)<0)throw new Error("Prices cannot be negative");result=await window.api.catalogUpdateProduct(p.id,{selling_price_usd:selling===""?null:Number(selling),vendor_price_usd:vendor===""?null:Number(vendor)})}else if(b.classList.contains("stock"))result=await window.api.catalogSetStock(p.id,b.dataset.inStock==="true");else if(b.classList.contains("archive")){const restore=b.dataset.restore==="true";if(!restore&&!confirm("Archive "+p.item_name+"? Historical sales remain unchanged."))return;result=restore?await window.api.catalogRestoreProduct(p.id):await window.api.catalogArchiveProduct(p.id)}if(!result||result.ok===false)throw new Error(result&&result.error||"Update failed");await loadCatalog("Reloading catalog…");setStatus("Product updated successfully.","success")}catch(error){setStatus(String(error.message||error),"error")}finally{b.disabled=false}})
+$("tbody").addEventListener("error",e=>{if(!e.target.classList.contains("thumb"))return;const wrap=e.target.parentNode;wrap.replaceChildren(document.createTextNode("No image"))},true);
+$("btnRefresh").addEventListener("click",async()=>{const b=$("btnRefresh");b.disabled=true;setStatus("Refreshing cache from Supabase…");const r=await window.api.catalogRefreshCache();b.disabled=false;if(!r||r.ok===false){setStatus(r&&r.error||"Refresh failed","error");return}await loadCatalog();setStatus("Catalog cache refreshed: "+r.products+" products.","success")})
+$("btnNew").addEventListener("click",()=>openModal(null));$("btnCancel").addEventListener("click",closeModal);$("backdrop").addEventListener("click",closeModal);document.addEventListener("keydown",e=>{if(e.key==="Escape")closeModal()});
+["search","filterSupplier","filterMerchant","filterBrand","filterCategory","filterAvailability","showArchived"].forEach(id=>$(id).addEventListener(id==="search"?"input":"change",render));
+$("btnLegacyImport").addEventListener("click",async()=>{const r=await window.api.productsImportExcel();if(r&&r.ok)setStatus("Imported "+r.count+" products into the legacy local table.","success");else if(r&&!r.canceled)setStatus(r.error||"Legacy import failed","error")});
+$("btnLegacyExport").addEventListener("click",async()=>{const r=await window.api.productsExportExcel();if(r&&r.ok)setStatus("Legacy products exported.","success");else if(r&&!r.canceled)setStatus(r.error||"Legacy export failed","error")});
+loadCatalog().catch(error=>setStatus(String(error.message||error),"error"));
 </script>
-
 </body>
 </html>

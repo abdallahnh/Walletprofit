@@ -230,3 +230,21 @@ test("catalog service rejects negative price changes before calling Supabase", a
   await assert.rejects(() => service.updateVendorPrice("product-1", -1), /non-negative/);
   assert.equal(requests, 0);
 });
+
+test("Products page uses the central catalog and remains usable as mobile cards", () => {
+  const html = fs.readFileSync(
+    path.join(__dirname, "..", "src", "render", "products.html"),
+    "utf8"
+  );
+  assert.match(html, /catalogGetProducts/);
+  assert.match(html, /catalogRefreshCache/);
+  assert.match(html, /catalogArchiveProduct/);
+  assert.match(html, /catalogRestoreProduct/);
+  assert.match(html, /catalogSetStock/);
+  assert.match(html, /Vendor Price USD/);
+  assert.match(html, /All suppliers/);
+  assert.match(html, /Show archived/);
+  assert.match(html, /@media\(max-width:720px\)/);
+  assert.match(html, /td:before\{content:attr\(data-label\)/);
+  assert.match(html, /No image/);
+});
