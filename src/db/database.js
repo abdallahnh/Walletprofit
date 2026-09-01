@@ -483,6 +483,8 @@ function ensureProfitDistributionTables(dbConn) {
       label TEXT NOT NULL,
       kind TEXT NOT NULL DEFAULT 'regular',
       split_version_id INTEGER NOT NULL REFERENCES profit_split_versions(id),
+      gross_profit_lbp INTEGER NOT NULL DEFAULT 0,
+      expenses_lbp INTEGER NOT NULL DEFAULT 0,
       total_profit_lbp INTEGER NOT NULL DEFAULT 0,
       cutoff_order_code TEXT,
       cutoff_transaction_id INTEGER,
@@ -508,11 +510,27 @@ function ensureProfitDistributionTables(dbConn) {
       is_business INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (batch_id, party_key)
     );
+    CREATE TABLE IF NOT EXISTS profit_distribution_expenses (
+      batch_id INTEGER NOT NULL REFERENCES profit_distribution_batches(id),
+      expense_id INTEGER NOT NULL UNIQUE,
+      expense_date TEXT,
+      description TEXT DEFAULT '',
+      amount_lbp INTEGER NOT NULL,
+      PRIMARY KEY (batch_id, expense_id)
+    );
     CREATE INDEX IF NOT EXISTS idx_profit_distribution_orders_batch
       ON profit_distribution_orders(batch_id);
     CREATE INDEX IF NOT EXISTS idx_profit_distribution_batches_created
       ON profit_distribution_batches(created_at DESC, id DESC);
   `);
+
+  const batchColumns = new Set(dbConn.prepare("PRAGMA table_info(profit_distribution_batches)").all().map((row) => row.name));
+  if (!batchColumns.has("gross_profit_lbp")) {
+    dbConn.exec("ALTER TABLE profit_distribution_batches ADD COLUMN gross_profit_lbp INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!batchColumns.has("expenses_lbp")) {
+    dbConn.exec("ALTER TABLE profit_distribution_batches ADD COLUMN expenses_lbp INTEGER NOT NULL DEFAULT 0");
+  }
 
   const count = Number(dbConn.prepare("SELECT COUNT(*) AS count FROM profit_split_versions").get()?.count || 0);
   if (count) return;

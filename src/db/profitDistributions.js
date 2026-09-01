@@ -58,6 +58,19 @@ function getDistributedOrderCodes() {
     .map((row) => String(row.order_code)));
 }
 
+function getDistributedExpenseIds() {
+  return new Set(getDb().prepare("SELECT expense_id FROM profit_distribution_expenses").all()
+    .map((row) => Number(row.expense_id)));
+}
+
+function getUndistributedExpenses(predicate = () => true) {
+  const distributed = getDistributedExpenseIds();
+  return getDb().prepare(`
+    SELECT id, expense_date, description, amount_lbp
+    FROM company_expenses ORDER BY expense_date, id
+  `).all().filter((row) => !distributed.has(Number(row.id)) && predicate(row));
+}
+
 function allocateProfit(totalProfitLbp, rule) {
   const members = rule?.members || [];
   const totalUnits = members.reduce((sum, member) => sum + Number(member.share_units || 0), 0);
@@ -101,7 +114,11 @@ function getHistoricalPreview(cutoffOrderCode = DEFAULT_CUTOFF_ORDER) {
   );
   const known = orders.filter((order) => order.net_profit_lbp != null);
   const missing = orders.filter((order) => order.net_profit_lbp == null);
-  const totalProfit = known.reduce((sum, order) => sum + Number(order.net_profit_lbp), 0);
+  const grossProfit = known.reduce((sum, order) => sum + Number(order.net_profit_lbp), 0);
+  const cutoffDate = String(cutoff.order_date || "").slice(0, 10);
+  const expenses = getUndistributedExpenses((expense) => !cutoffDate || String(expense.expense_date) < cutoffDate);
+  const expenseTotal = expenses.reduce((sum, expense) => sum + Number(expense.amount_lbp || 0), 0);
+  const totalProfit = grossProfit - expenseTotal;
   const rule = getHistoricalRule();
   return {
     ok: true,
@@ -112,8 +129,11 @@ function getHistoricalPreview(cutoffOrderCode = DEFAULT_CUTOFF_ORDER) {
     order_count: orders.length,
     known_order_count: known.length,
     missing_cost_orders: missing.length,
+    gross_profit_lbp: grossProfit,
+    expenses_lbp: expenseTotal,
     total_profit_lbp: totalProfit,
     orders,
+    expenses,
     allocations: allocateProfit(totalProfit, rule),
     rule,
   };
@@ -141,15 +161,21 @@ function getCurrentPreview() {
   );
   const known = candidates.filter((order) => order.net_profit_lbp != null);
   const missing = candidates.filter((order) => order.net_profit_lbp == null);
-  const totalProfit = known.reduce((sum, order) => sum + Number(order.net_profit_lbp), 0);
+  const grossProfit = known.reduce((sum, order) => sum + Number(order.net_profit_lbp), 0);
+  const expenses = getUndistributedExpenses();
+  const expenseTotal = expenses.reduce((sum, expense) => sum + Number(expense.amount_lbp || 0), 0);
+  const totalProfit = grossProfit - expenseTotal;
   const rule = getActiveRule();
   return {
     ok: true,
     kind: "regular",
     order_count: known.length,
     missing_cost_orders: missing.length,
+    gross_profit_lbp: grossProfit,
+    expenses_lbp: expenseTotal,
     total_profit_lbp: totalProfit,
     orders: known,
+    expenses,
     missing_orders: missing,
     allocations: allocateProfit(totalProfit, rule),
     rule,
@@ -167,12 +193,14 @@ function postPreview(preview, payload = {}) {
   return db.transaction(() => {
     const batch = db.prepare(`
       INSERT INTO profit_distribution_batches (
-        label, kind, split_version_id, total_profit_lbp, cutoff_order_code,
+        label, kind, split_version_id, gross_profit_lbp, expenses_lbp,
+        total_profit_lbp, cutoff_order_code,
         cutoff_transaction_id, order_count, missing_cost_orders, notes, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     `).run(
       String(payload.label || (preview.kind === "historical" ? "Opening historical distribution" : "Profit distribution")),
-      preview.kind, preview.rule.id, preview.total_profit_lbp,
+      preview.kind, preview.rule.id, preview.gross_profit_lbp,
+      preview.expenses_lbp, preview.total_profit_lbp,
       preview.cutoff_order_code || null, preview.cutoff_transaction_id || null,
       preview.orders.length, preview.missing_cost_orders || 0, String(payload.notes || "")
     );
@@ -183,6 +211,14 @@ function postPreview(preview, payload = {}) {
     `);
     for (const order of preview.orders) {
       addOrder.run(batchId, order.order_code, order.order_date, order.net_profit_lbp);
+    }
+    const addExpense = db.prepare(`
+      INSERT INTO profit_distribution_expenses (
+        batch_id, expense_id, expense_date, description, amount_lbp
+      ) VALUES (?, ?, ?, ?, ?)
+    `);
+    for (const expense of preview.expenses || []) {
+      addExpense.run(batchId, expense.id, expense.expense_date, expense.description || "", expense.amount_lbp);
     }
     const addAllocation = db.prepare(`
       INSERT INTO profit_distribution_allocations (
@@ -248,9 +284,13 @@ function getHistory() {
   const allocations = db.prepare(`
     SELECT * FROM profit_distribution_allocations ORDER BY batch_id, party_key
   `).all();
+  const expenses = db.prepare(`
+    SELECT * FROM profit_distribution_expenses ORDER BY batch_id, expense_date, expense_id
+  `).all();
   return batches.map((batch) => ({
     ...batch,
     allocations: allocations.filter((row) => Number(row.batch_id) === Number(batch.id)),
+    expenses: expenses.filter((row) => Number(row.batch_id) === Number(batch.id)),
   }));
 }
 
@@ -260,9 +300,10 @@ function getSummary() {
     .reduce((sum, order) => sum + Number(order.net_profit_lbp), 0);
   const history = getHistory();
   const distributed = history.reduce((sum, batch) => sum + Number(batch.total_profit_lbp || 0), 0);
+  const expenses = Number(getDb().prepare("SELECT COALESCE(SUM(amount_lbp),0) AS total FROM company_expenses").get()?.total || 0);
   const historicalInitialized = history.some((batch) => batch.kind === "historical");
   const currentPreview = historicalInitialized ? getCurrentPreview() : null;
-  const remaining = currentPreview?.ok ? Number(currentPreview.total_profit_lbp || 0) : knownLifetime;
+  const remaining = currentPreview?.ok ? Number(currentPreview.total_profit_lbp || 0) : knownLifetime - expenses;
   const allocations = history.flatMap((batch) => batch.allocations || []);
   const participantMap = new Map();
   for (const row of allocations) {
@@ -274,16 +315,17 @@ function getSummary() {
     participant.allocated_lbp += Number(row.amount_lbp || 0);
     participant.paid_lbp += Number(row.paid_amount_lbp || 0);
   }
-  const expenses = Number(getDb().prepare("SELECT COALESCE(SUM(amount_lbp),0) AS total FROM company_expenses").get()?.total || 0);
   const participants = Array.from(participantMap.values()).map((participant) => ({
     ...participant,
-    expenses_lbp: participant.is_business ? expenses : 0,
+    expenses_lbp: 0,
     balance_lbp: participant.is_business
-      ? participant.allocated_lbp - expenses
+      ? participant.allocated_lbp
       : participant.allocated_lbp - participant.paid_lbp,
   }));
   return {
     lifetime_net_profit_lbp: knownLifetime,
+    company_expenses_lbp: expenses,
+    lifetime_distributable_profit_lbp: knownLifetime - expenses,
     distributed_profit_lbp: distributed,
     remaining_profit_lbp: remaining,
     incomplete_profit_orders: orders.filter((order) => order.net_profit_lbp == null).length,

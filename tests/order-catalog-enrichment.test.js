@@ -219,7 +219,7 @@ test("cloud JSON backup round-trip preserves immutable item and sale snapshots",
     { barcode: "619659052775", quantity: 2 },
   ]));
   const backup = walletDb.collectBackupData();
-  assert.equal(backup.schema_version, 6);
+  assert.equal(backup.schema_version, 7);
   assert.equal(backup.order_items.length, 1);
   walletDb.importBackupData(backup, { replace: true });
   db = database.getDb();

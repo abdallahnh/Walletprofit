@@ -111,8 +111,13 @@ test("mobile profit ledger preserves historical and current split versions", () 
     { id: 2, amount: -300000, type: "gross_app_revenue", order_code: "10863-98881", created_at: "2026-07-24" },
     { id: 3, amount: -200000, type: "gross_app_revenue", order_code: "NEW-2", created_at: "2026-07-25" },
   ];
+  data.company_expenses = [
+    { id: 1, category: "Other", description: "Historical expense", amount_lbp: 90000, expense_date: "2026-07-19" },
+  ];
   const historical = Core.previewHistoricalProfit(data, "10863-98881");
-  assert.deepEqual(historical.allocations.map((row) => row.amount_lbp), [300000, 100000, 200000]);
+  assert.equal(historical.gross_profit_lbp, 600000);
+  assert.equal(historical.expenses_lbp, 90000);
+  assert.deepEqual(historical.allocations.map((row) => row.amount_lbp), [255000, 85000, 170000]);
   assert.equal(Core.postProfitPreview(data, historical, {}).ok, true);
   const current = Core.previewCurrentProfit(data);
   assert.equal(current.total_profit_lbp, 500000);

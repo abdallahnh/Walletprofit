@@ -60,11 +60,30 @@ test("current distributions use the latest active 43/34/23 rule and preserve his
   const summary = distributions.getSummary();
   assert.equal(summary.lifetime_net_profit_lbp, 2000000);
   assert.equal(summary.distributed_profit_lbp, 2000000);
-  assert.equal(summary.remaining_profit_lbp, 0);
+  assert.equal(summary.remaining_profit_lbp, -100000);
+  assert.equal(summary.company_expenses_lbp, 100000);
+  assert.equal(summary.lifetime_distributable_profit_lbp, 1900000);
   const business = summary.participants.find((row) => row.party_key === "business");
   assert.equal(business.allocated_lbp, 615000);
-  assert.equal(business.expenses_lbp, 100000);
-  assert.equal(business.balance_lbp, 515000);
+  assert.equal(business.expenses_lbp, 0);
+  assert.equal(business.balance_lbp, 615000);
+});
+
+test("expenses are snapshotted and deducted before applying the historical split", () => {
+  const db = setup();
+  db.prepare(`
+    INSERT INTO company_expenses (category, description, amount_lbp, expense_date)
+    VALUES ('Other', 'Historical expense', 90000, '2026-07-19')
+  `).run();
+  const preview = distributions.getHistoricalPreview();
+  assert.equal(preview.gross_profit_lbp, 1500000);
+  assert.equal(preview.expenses_lbp, 90000);
+  assert.equal(preview.total_profit_lbp, 1410000);
+  assert.deepEqual(preview.allocations.map((row) => row.amount_lbp), [705000, 235000, 470000]);
+  distributions.postHistorical();
+  const history = distributions.getHistory();
+  assert.equal(history[0].expenses.length, 1);
+  assert.equal(history[0].expenses_lbp, 90000);
 });
 
 test("saving a new split creates a version and only affects later batches", () => {
@@ -85,12 +104,15 @@ test("saving a new split creates a version and only affects later batches", () =
 });
 
 test("cloud JSON backup round-trip preserves split versions and immutable batches", () => {
-  setup();
+  const db = setup();
+  db.prepare(`INSERT INTO company_expenses (category, description, amount_lbp, expense_date)
+    VALUES ('Other', 'Historical expense', 90000, '2026-07-19')`).run();
   distributions.postHistorical();
   distributions.postCurrent();
   const backup = walletDb.collectBackupData();
-  assert.equal(backup.schema_version, 6);
+  assert.equal(backup.schema_version, 7);
   assert.equal(backup.profit_distribution_batches.length, 2);
+  assert.equal(backup.profit_distribution_expenses.length, 1);
   walletDb.importBackupData(backup, { replace: true });
   assert.equal(distributions.getHistory().length, 2);
   assert.equal(distributions.getSummary().remaining_profit_lbp, 0);

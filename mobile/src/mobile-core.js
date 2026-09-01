@@ -45,6 +45,7 @@
       profit_distribution_batches: [],
       profit_distribution_orders: [],
       profit_distribution_allocations: [],
+      profit_distribution_expenses: [],
       config: [],
       walletConfig: {
         baseUrl: "https://dashboard.toters-api.com",
@@ -65,6 +66,7 @@
       "sales", "product_price_history", "company_expenses", "config",
       "profit_split_versions", "profit_split_members", "profit_distribution_batches",
       "profit_distribution_orders", "profit_distribution_allocations",
+      "profit_distribution_expenses",
     ]) {
       base[key] = Array.isArray(data[key]) ? data[key] : base[key];
     }
@@ -651,13 +653,18 @@
     const target = data.transactions.filter((tx) => String(tx.order_code || extractOrderCode(tx.reason)) === String(cutoffOrderCode));
     if (!target.length) return { ok: false, error: `Cutoff order ${cutoffOrderCode} was not found` };
     const cutoff = Math.min(...target.map((tx) => Number(tx.id || 0)).filter(Boolean));
+    const cutoffDate = String(target.map((tx) => tx.created_at).filter(Boolean).sort()[0] || "").slice(0, 10);
     const distributed = new Set(data.profit_distribution_orders.map((row) => String(row.order_code)));
     const orders = profitOrderRows(data).filter((row) => !distributed.has(row.order_code) && row.max_transaction_id > 0 && row.max_transaction_id < cutoff);
     const known = orders.filter((row) => row.net_profit_lbp != null), missing = orders.length - known.length;
-    const total = known.reduce((sum, row) => sum + Number(row.net_profit_lbp), 0);
+    const gross = known.reduce((sum, row) => sum + Number(row.net_profit_lbp), 0);
+    const usedExpenses = new Set(data.profit_distribution_expenses.map((row) => Number(row.expense_id)));
+    const expenses = data.company_expenses.filter((row) => !usedExpenses.has(Number(row.id)) && (!cutoffDate || String(row.expense_date) < cutoffDate));
+    const expenseTotal = expenses.reduce((sum, row) => sum + Number(row.amount_lbp || 0), 0), total = gross - expenseTotal;
     const rule = getProfitRules(data).find((row) => row.is_historical);
     return { ok: true, kind: "historical", cutoff_order_code: String(cutoffOrderCode), cutoff_transaction_id: cutoff,
-      order_count: orders.length, missing_cost_orders: missing, total_profit_lbp: total, orders,
+      order_count: orders.length, missing_cost_orders: missing, gross_profit_lbp: gross,
+      expenses_lbp: expenseTotal, total_profit_lbp: total, orders, expenses,
       allocations: allocateProfit(total, rule), rule };
   }
 
@@ -667,10 +674,14 @@
     const distributed = new Set(data.profit_distribution_orders.map((row) => String(row.order_code))), cutoff = Number(historical.cutoff_transaction_id || 0);
     const candidates = profitOrderRows(data).filter((row) => !distributed.has(row.order_code) && (!cutoff || !row.max_transaction_id || row.max_transaction_id >= cutoff));
     const orders = candidates.filter((row) => row.net_profit_lbp != null), missing = candidates.filter((row) => row.net_profit_lbp == null);
-    const total = orders.reduce((sum, row) => sum + Number(row.net_profit_lbp), 0);
+    const gross = orders.reduce((sum, row) => sum + Number(row.net_profit_lbp), 0);
+    const usedExpenses = new Set(data.profit_distribution_expenses.map((row) => Number(row.expense_id)));
+    const expenses = data.company_expenses.filter((row) => !usedExpenses.has(Number(row.id)));
+    const expenseTotal = expenses.reduce((sum, row) => sum + Number(row.amount_lbp || 0), 0), total = gross - expenseTotal;
     const rule = getProfitRules(data).find((row) => row.is_active && !row.is_historical);
     return { ok: true, kind: "regular", order_count: orders.length, missing_cost_orders: missing.length,
-      total_profit_lbp: total, orders, missing_orders: missing, allocations: allocateProfit(total, rule), rule };
+      gross_profit_lbp: gross, expenses_lbp: expenseTotal, total_profit_lbp: total,
+      orders, expenses, missing_orders: missing, allocations: allocateProfit(total, rule), rule };
   }
 
   function postProfitPreview(rawData, preview, payload) {
@@ -681,9 +692,12 @@
     const id = nextId(data.profit_distribution_batches), now = new Date().toISOString();
     data.profit_distribution_batches.push({ id, label: String(payload?.label || (preview.kind === "historical" ? "Opening historical distribution" : "Profit distribution")),
       kind: preview.kind, split_version_id: preview.rule.id, total_profit_lbp: preview.total_profit_lbp,
+      gross_profit_lbp: preview.gross_profit_lbp, expenses_lbp: preview.expenses_lbp,
       cutoff_order_code: preview.cutoff_order_code || null, cutoff_transaction_id: preview.cutoff_transaction_id || null,
       order_count: preview.orders.length, missing_cost_orders: preview.missing_cost_orders || 0, notes: String(payload?.notes || ""), created_at: now });
     preview.orders.forEach((order) => data.profit_distribution_orders.push({ batch_id: id, order_code: order.order_code, order_date: order.order_date, net_profit_lbp: order.net_profit_lbp }));
+    (preview.expenses||[]).forEach((expense) => data.profit_distribution_expenses.push({ batch_id:id, expense_id:expense.id,
+      expense_date:expense.expense_date, description:expense.description||"", amount_lbp:Number(expense.amount_lbp||0) }));
     preview.allocations.forEach((row) => data.profit_distribution_allocations.push({ batch_id: id, party_key: row.party_key,
       display_name: row.display_name, share_units: row.share_units, amount_lbp: row.amount_lbp,
       paid_amount_lbp: row.is_business ? 0 : row.amount_lbp, is_business: row.is_business ? 1 : 0 }));
@@ -705,7 +719,8 @@
     const data = normalizeData(rawData), rules = new Map(data.profit_split_versions.map((row) => [Number(row.id), row]));
     return [...data.profit_distribution_batches].sort((a,b)=>Number(b.id)-Number(a.id)).map((batch) => ({ ...batch,
       rule_name: rules.get(Number(batch.split_version_id))?.name || "Unknown rule",
-      allocations: data.profit_distribution_allocations.filter((row) => Number(row.batch_id) === Number(batch.id)) }));
+      allocations: data.profit_distribution_allocations.filter((row) => Number(row.batch_id) === Number(batch.id)),
+      expenses: data.profit_distribution_expenses.filter((row) => Number(row.batch_id) === Number(batch.id)) }));
   }
 
   function getProfitSummary(rawData) {
@@ -714,9 +729,10 @@
     const distributed = history.reduce((sum,row)=>sum+Number(row.total_profit_lbp||0),0), participants = new Map();
     for (const row of data.profit_distribution_allocations) { const p=participants.get(row.party_key)||{party_key:row.party_key,display_name:row.display_name,allocated_lbp:0,paid_lbp:0,is_business:!!row.is_business};p.allocated_lbp+=Number(row.amount_lbp||0);p.paid_lbp+=Number(row.paid_amount_lbp||0);participants.set(row.party_key,p); }
     const expenses=data.company_expenses.reduce((sum,row)=>sum+Number(row.amount_lbp||0),0);
-    const participantRows=[...participants.values()].map(p=>({...p,expenses_lbp:p.is_business?expenses:0,balance_lbp:p.is_business?p.allocated_lbp-expenses:p.allocated_lbp-p.paid_lbp}));
-    const historicalInitialized=history.some(row=>row.kind==="historical"),current=historicalInitialized?previewCurrentProfit(data):null,remaining=current?.ok?Number(current.total_profit_lbp||0):lifetime;
-    return { lifetime_net_profit_lbp:lifetime,distributed_profit_lbp:distributed,remaining_profit_lbp:remaining,
+    const participantRows=[...participants.values()].map(p=>({...p,expenses_lbp:0,balance_lbp:p.is_business?p.allocated_lbp:p.allocated_lbp-p.paid_lbp}));
+    const historicalInitialized=history.some(row=>row.kind==="historical"),current=historicalInitialized?previewCurrentProfit(data):null,remaining=current?.ok?Number(current.total_profit_lbp||0):lifetime-expenses;
+    return { lifetime_net_profit_lbp:lifetime,company_expenses_lbp:expenses,lifetime_distributable_profit_lbp:lifetime-expenses,
+      distributed_profit_lbp:distributed,remaining_profit_lbp:remaining,
       incomplete_profit_orders:orders.filter(row=>row.net_profit_lbp==null).length,historical_initialized:historicalInitialized,
       active_rule:getProfitRules(data).find(row=>row.is_active&&!row.is_historical)||null,participants:participantRows,batches:history.length };
   }

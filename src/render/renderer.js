@@ -341,6 +341,8 @@ function setStats(t, distribution) {
   }
 
   if (distribution) {
+    blocks.push([`All-time Expenses from Profit`, fmt(distribution.company_expenses_lbp || 0)]);
+    blocks.push([`All-time Profit After Expenses`, fmt(distribution.lifetime_distributable_profit_lbp || 0)]);
     blocks.push([`All-time Distributed Profit`, fmt(distribution.distributed_profit_lbp || 0)]);
     blocks.push([`All-time Remaining Profit`, fmt(distribution.remaining_profit_lbp || 0)]);
     const business = (distribution.participants || []).find((row) => row.party_key === "business");
