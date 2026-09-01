@@ -392,6 +392,7 @@ th {
     }
 
     function formatCurrency(amount) {
+      if (amount == null) return 'Missing cost';
       const numAmount = Number(amount) || 0;
       if (currentCurrency === 'LBP') {
         const lbpAmount = numAmount * usdToLbpRate;
@@ -409,6 +410,7 @@ th {
     }
 
     function calculateMargin(revenue, profit) {
+      if (profit == null) return '—';
       return revenue > 0 ? ((profit / revenue) * 100).toFixed(1) : 0;
     }
 
@@ -519,10 +521,11 @@ th {
 
         // Wallet amounts are stored in LBP
         const totalRevenue = revenueData.reduce((sum, d) => sum + d.revenue, 0);
-        const totalProfit = revenueData.reduce((sum, d) => sum + d.profit, 0);
+        const missingCostOrders = revenueData.reduce((sum, d) => sum + Number(d.missing_cost_orders || 0), 0);
+        const totalProfit = revenueData.reduce((sum, d) => sum + (d.profit == null ? 0 : Number(d.profit)), 0);
         const totalOrders = revenueData.reduce((sum, d) => sum + d.order_count, 0);
         const totalQuantity = revenueData.reduce((sum, d) => sum + d.quantity_sold, 0);
-        const avgMargin = totalRevenue > 0 ? ((totalProfit / totalRevenue) * 100) : 0;
+        const avgMargin = !missingCostOrders && totalRevenue > 0 ? ((totalProfit / totalRevenue) * 100) : null;
 
         // Update stats grid
         document.getElementById('statsGrid').innerHTML = `
@@ -532,7 +535,7 @@ th {
           </div>
           <div class="stat-card">
             <div class="stat-value">${formatLbp(totalProfit)}</div>
-            <div class="stat-label">Net Profit</div>
+            <div class="stat-label">${missingCostOrders ? 'Known Net Profit' : 'Net Profit'}</div>
           </div>
           <div class="stat-card">
             <div class="stat-value">${formatNumber(totalOrders)}</div>
@@ -543,9 +546,10 @@ th {
             <div class="stat-label">Transaction Rows</div>
           </div>
           <div class="stat-card">
-            <div class="stat-value">${avgMargin.toFixed(1)}%</div>
+            <div class="stat-value">${avgMargin == null ? 'Incomplete' : avgMargin.toFixed(1) + '%'}</div>
             <div class="stat-label">Avg Profit Margin</div>
           </div>
+          ${missingCostOrders ? `<div class="stat-card"><div class="stat-value">${missingCostOrders}</div><div class="stat-label">Orders Missing Cost</div></div>` : ''}
         `;
 
         // Create charts
@@ -722,7 +726,7 @@ th {
         marginChart.destroy();
       }
 
-      const margins = data.map(d => d.revenue > 0 ? ((d.profit / d.revenue) * 100) : 0);
+      const margins = data.map(d => d.profit == null ? null : d.revenue > 0 ? ((d.profit / d.revenue) * 100) : 0);
 
       marginChart = new Chart(ctx, {
         type: 'line',

@@ -10,6 +10,7 @@ const salesDb = require("../src/db/sales");
 const orderItemsDb = require("../src/db/orderItems");
 const orderLineMeta = require("../src/db/orderLineMeta");
 const walletDb = require("../src/db/wallet");
+const ordersDb = require("../src/db/orders");
 
 const mappings = [
   { merchant_code: "B", supplier_key: "bassam", supplier_name: "Bassam" },
@@ -101,7 +102,7 @@ test("out-of-stock and archived products still enrich historical accounting", ()
 });
 
 test("one order allocates supplier costs independently for Bassam and Ahmad", () => {
-  setup([
+  const db = setup([
     product(),
     product({ id: "product-ahmad", barcode: "AHMAD-7", item_name: "Ahmad item", vendor_price_usd: 7, merchant_code: "T" }),
   ]);
@@ -113,6 +114,19 @@ test("one order allocates supplier costs independently for Bassam and Ahmad", ()
   assert.equal(totals.is_multi_supplier, true);
   assert.deepEqual(new Set(totals.supplier_name.split(", ")), new Set(["Bassam", "Ahmad"]));
   assert.equal(totals.supplier_cost, 12 * 90000);
+  db.prepare(`
+    INSERT INTO transactions (id, amount, reason, type, created_at, order_code)
+    VALUES (1, -1800000, 'Order 40600-47013', 'gross_app_revenue', '2026-08-25', '40600-47013')
+  `).run();
+  const summary = ordersDb.getSupplierSummary();
+  assert.deepEqual(summary.map((row) => ({
+    name: row.supplier_name,
+    products: row.product_count,
+    units: row.units_sold,
+  })), [
+    { name: "Ahmad", products: 1, units: 1 },
+    { name: "Bassam", products: 1, units: 1 },
+  ]);
 });
 
 test("missing product and missing Vendor Price stay explicit and never become zero cost", () => {
@@ -128,6 +142,20 @@ test("missing product and missing Vendor Price stay explicit and never become ze
   assert.equal(sale.cost, null);
   assert.equal(sale.profit, null);
   assert.equal(orderLineMeta.getOrderLineTotals("40600-47014").has_lines, false);
+  const reportRow = salesDb.getSalesReport().find((row) => row.barcode === "619659052775");
+  assert.equal(reportRow.supplier_cost, null);
+  assert.equal(reportRow.profit, null);
+  assert.equal(reportRow.cost_status, "Missing Vendor Price");
+  db.prepare(`
+    INSERT INTO transactions (id, amount, reason, type, created_at, order_code)
+    VALUES (1, -900000, 'Order 40600-47014', 'gross_app_revenue', '2026-08-25', '40600-47014')
+  `).run();
+  const reconciliation = ordersDb.getOrdersReconciliation()[0];
+  assert.equal(reconciliation.has_unknown_supplier_cost, 1);
+  assert.equal(reconciliation.net_profit, null);
+  const period = ordersDb.getWalletRevenueByPeriod({ period: "day" })[0];
+  assert.equal(period.profit, null);
+  assert.equal(period.missing_cost_orders, 1);
 });
 
 test("cloud JSON backup round-trip preserves immutable item and sale snapshots", () => {
@@ -163,4 +191,52 @@ test("an existing manual order cost remains an explicit override during catalog 
   assert.equal(sale.unit_supplier_cost_usd, 8);
   assert.equal(sale.cost_source, "manual_override");
   assert.equal(db.prepare("SELECT supplier_cost FROM order_meta WHERE order_code=?").get("40600-47016").supplier_cost, 8 * 90000);
+});
+
+test("safe historical backfill enriches metadata without applying today's Vendor Price", () => {
+  const db = setup([]);
+  db.prepare(`
+    INSERT INTO sales (order_code, barcode, quantity, unit_price, cost, total_sale, profit, created_at)
+    VALUES ('40600-47017', '619659052775', 1, 10, 4, 10, 6, '2026-01-01T10:00:00Z')
+  `).run();
+  salesDb.recordOrderItemsToSales(order("40600-47017", [
+    { barcode: "619659052775", quantity: 1 },
+  ]));
+  catalogCache.replaceCatalog([product({ vendor_price_usd: 5 })], mappings);
+
+  const retry = orderItemsDb.retryPendingItems({ recentWindowDays: 1 });
+  assert.equal(retry.historical_cost_review, 1);
+  assert.deepEqual(retry.order_codes, []);
+
+  const preview = orderItemsDb.getBackfillPreview();
+  assert.equal(preview.total_candidates, 1);
+  assert.equal(preview.current_price_candidates, 1);
+  const result = orderItemsDb.backfillMissingProductData({ applyCurrentVendorPrice: false });
+  assert.equal(result.metadata_updated, 1);
+  assert.equal(result.costs_snapshotted, 0);
+  assert.equal(result.historical_cost_review, 1);
+  const item = orderItemsDb.getOrderItems("40600-47017")[0];
+  assert.equal(item.catalog_product_id, "product-sandisk");
+  assert.equal(item.supplier_id != null, true);
+  assert.equal(item.unit_supplier_cost_usd, null);
+  assert.equal(item.catalog_sync_status, "historical_cost_review");
+  const sale = db.prepare("SELECT cost, profit, catalog_product_id FROM sales WHERE order_code=?")
+    .get("40600-47017");
+  assert.equal(sale.cost, 4);
+  assert.equal(sale.profit, 6);
+  assert.equal(sale.catalog_product_id, "product-sandisk");
+});
+
+test("current Vendor Price is snapshotted only after explicit historical backfill opt-in", () => {
+  const db = setup([]);
+  salesDb.recordOrderItemsToSales(order("40600-47018", [
+    { barcode: "619659052775", quantity: 2 },
+  ]));
+  catalogCache.replaceCatalog([product({ vendor_price_usd: 5 })], mappings);
+  orderItemsDb.backfillMissingProductData({ applyCurrentVendorPrice: false });
+  const result = orderItemsDb.backfillMissingProductData({ applyCurrentVendorPrice: true });
+  assert.equal(result.costs_snapshotted, 1);
+  assert.deepEqual(result.order_codes, ["40600-47018"]);
+  salesDb.rebuildSalesFromStoredOrderItems("40600-47018");
+  assert.equal(db.prepare("SELECT cost FROM sales WHERE order_code=?").get("40600-47018").cost, 10);
 });

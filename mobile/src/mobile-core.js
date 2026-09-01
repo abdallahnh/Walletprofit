@@ -118,11 +118,17 @@
         .filter((sale) => sale.order_code === orderCode)
         .map((sale) => [String(sale.barcode || ""), sale])
     );
+    const itemByBarcode = new Map(
+      data.order_items
+        .filter((item) => item.order_code === orderCode && item.barcode)
+        .map((item) => [String(item.barcode), item])
+    );
     return data.order_line_meta
       .filter((line) => line.order_code === orderCode)
       .map((line) => {
         const supplier = byId.get(Number(line.supplier_id));
         const sale = saleByBarcode.get(String(line.barcode || ""));
+        const orderItem = itemByBarcode.get(String(line.barcode || ""));
         const product = data.products.find((item) => String(item.barcode || "") === String(line.barcode || ""));
         return {
           ...line,
@@ -133,8 +139,11 @@
           supplier_cost_lbp: Number(line.supplier_cost_lbp || 0),
           supplier_paid: line.supplier_paid ? 1 : 0,
           total_sale: Number(sale?.total_sale || 0),
-          quantity: Number(sale?.quantity || 0),
-          item_name: product?.item_name || line.barcode || "Item",
+          quantity: Number(orderItem?.quantity ?? sale?.quantity ?? 0),
+          item_name: orderItem?.item_name_snapshot || product?.item_name || line.barcode || "Item",
+          image_url_snapshot: orderItem?.image_url_snapshot || null,
+          unit_supplier_cost_usd: orderItem?.unit_supplier_cost_usd ?? null,
+          catalog_sync_status: orderItem?.catalog_sync_status || null,
         };
       });
   }
@@ -195,7 +204,8 @@
         (line) => Number(line.supplier_cost_lbp || 0) <= 0 || !!line.supplier_paid
       );
       const saleRows = salesByOrder.get(aggregate.order_code) || [];
-      const itemCount = Math.max(saleRows.length, lines.length, 1);
+      const storedItems = data.order_items.filter((item) => item.order_code === aggregate.order_code);
+      const itemCount = Math.max(storedItems.length, saleRows.length, lines.length, 1);
       const supplierNames = [...new Set(lines.map((line) => line.supplier_name).filter(Boolean))];
       const supplierCost = lines.length ? lineCost : Number(meta.supplier_cost || 0);
       const supplierPaid = lines.length ? allPositiveLinesPaid : !!meta.supplier_paid;
@@ -203,6 +213,29 @@
       const dates = [...aggregate.dates].sort();
       const expectedTypes = ["gross", "service_fee", "vat"];
       const missingTypes = expectedTypes.filter((type) => !aggregate.types.has(type));
+      const normalizedItems = storedItems.length ? storedItems.map((item) => ({
+        barcode: item.barcode,
+        item_name: item.item_name_snapshot || item.barcode,
+        quantity: Number(item.quantity || 0),
+        image_url: item.image_url_snapshot || null,
+        vendor_price_usd: item.unit_supplier_cost_usd ?? null,
+        supplier_id: item.supplier_id || null,
+        merchant_code: item.merchant_code || null,
+        catalog_sync_status: item.catalog_sync_status || null,
+        catalog_error: item.catalog_error || null,
+      })) : saleRows.map((sale) => {
+        const product = data.products.find((item) => Number(item.id) === Number(sale.product_id)) || {};
+        return {
+          barcode: sale.barcode,
+          item_name: sale.item_name_snapshot || product.item_name || sale.barcode,
+          quantity: Number(sale.quantity || 0),
+          total_sale: Number(sale.total_sale || 0),
+        };
+      });
+      const unresolvedItems = normalizedItems.filter((item) =>
+        item.catalog_sync_status && item.catalog_sync_status !== "matched"
+      );
+      const hasUnknownSupplierCost = unresolvedItems.length > 0 && meta.cost_source !== "manual_override";
       orders.push({
         order_code: aggregate.order_code,
         gross: aggregate.gross,
@@ -219,7 +252,9 @@
         supplier_color: supplier ? normalizeColor(supplier.color, supplier.id) : "",
         supplier_phone: supplier?.phone || "",
         supplier_line_ids: lineSupplierIds.length ? lineSupplierIds : (meta.supplier_id ? [Number(meta.supplier_id)] : []),
-        net_profit: merchantPayout - supplierCost,
+        net_profit: hasUnknownSupplierCost ? null : merchantPayout - supplierCost,
+        has_unknown_supplier_cost: hasUnknownSupplierCost ? 1 : 0,
+        missing_supplier_cost_items: unresolvedItems.length,
         row_count: aggregate.row_count,
         primary_date: dates[0] || "",
         latest_date: dates[dates.length - 1] || dates[0] || "",
@@ -231,17 +266,9 @@
         adjusted_items_count: Number(meta.adjusted_items_count || 0),
         item_count: itemCount,
         is_splittable: itemCount > 1,
-        is_multi_supplier: lineSupplierIds.length > 1 || itemCount > 1,
+        is_multi_supplier: lineSupplierIds.length > 1,
         line_meta: lines,
-        order_items: saleRows.map((sale) => {
-          const product = data.products.find((item) => Number(item.id) === Number(sale.product_id)) || {};
-          return {
-            barcode: sale.barcode,
-            item_name: product.item_name || sale.barcode,
-            quantity: Number(sale.quantity || 0),
-            total_sale: Number(sale.total_sale || 0),
-          };
-        }),
+        order_items: normalizedItems,
       });
     }
     orders.sort((left, right) =>
@@ -304,7 +331,7 @@
     const orders = filterOrders(computeOrders(data).orders, opts);
     const selected = Array.isArray(opts?.supplierIds) ? opts.supplierIds.map(Number) : [];
     const result = new Map();
-    const add = (id, name, revenue, cost, paid, orderShare) => {
+    const add = (id, name, revenue, cost, paid, orderShare, quantity, barcode) => {
       const key = Number(id || 0);
       if (selected.length && (!key || !selected.includes(key))) return;
       if (!result.has(key)) result.set(key, {
@@ -315,6 +342,8 @@
         supplier_cost: 0,
         payable: 0,
         profit: 0,
+        units_sold: 0,
+        _products: new Set(),
       });
       const row = result.get(key);
       row.orders += orderShare;
@@ -322,19 +351,24 @@
       row.supplier_cost += cost;
       if (!paid) row.payable += cost;
       row.profit += revenue - cost;
+      row.units_sold += Number(quantity || 0);
+      if (barcode) row._products.add(barcode);
     };
     for (const order of orders) {
       if (order.line_meta?.length) {
         const basis = order.line_meta.reduce((sum, line) => sum + Number(line.total_sale || 0), 0) || order.line_meta.length;
         for (const line of order.line_meta) {
           const share = basis ? (Number(line.total_sale || 0) || 1) / basis : 1 / order.line_meta.length;
-          add(line.supplier_id, line.supplier_name, Math.round(order.merchant_payout * share), Number(line.supplier_cost_lbp || 0), !!line.supplier_paid, share);
+          add(line.supplier_id, line.supplier_name, Math.round(order.merchant_payout * share), Number(line.supplier_cost_lbp || 0), !!line.supplier_paid, share, line.quantity, line.barcode);
         }
       } else {
-        add(order.supplier_id, order.supplier_name, Number(order.merchant_payout || 0), Number(order.supplier_cost || 0), !!order.supplier_paid, 1);
+        const items=(order.order_items||[]).filter(item=>!order.supplier_id||!item.supplier_id||Number(item.supplier_id)===Number(order.supplier_id));
+        add(order.supplier_id, order.supplier_name, Number(order.merchant_payout || 0), Number(order.supplier_cost || 0), !!order.supplier_paid, 1, items.reduce((sum,item)=>sum+Number(item.quantity||0),0));
+        const row=result.get(Number(order.supplier_id||0));
+        if(row)for(const item of items)if(item.barcode)row._products.add(item.barcode);
       }
     }
-    return [...result.values()].sort((a, b) => a.supplier_name.localeCompare(b.supplier_name));
+    return [...result.values()].map(row=>({...row,product_count:row._products.size,_products:undefined})).sort((a, b) => a.supplier_name.localeCompare(b.supplier_name));
   }
 
   function getTransactions(data, opts) {
@@ -382,7 +416,7 @@
       const key = sale.barcode || product.barcode || String(sale.product_id);
       if (!grouped.has(key)) grouped.set(key, {
         barcode: key,
-        item_name: product.item_name || key,
+        item_name: sale.item_name_snapshot || product.item_name || key,
         brand: product.brand || "",
         unit_price: Number(product.unit_price_usd || 0),
         cost_price: Number(product.cost_usd || 0),
@@ -390,14 +424,23 @@
         revenue: 0,
         supplier_cost: 0,
         profit: 0,
+        missing_cost_rows: 0,
       });
       const row = grouped.get(key);
       row.sold_qty += Number(sale.quantity || 0);
       row.revenue += Number(sale.total_sale || 0);
-      row.supplier_cost += Number(sale.cost || 0);
-      row.profit += Number(sale.profit || 0);
+      if (sale.cost == null || sale.profit == null) row.missing_cost_rows += 1;
+      else {
+        row.supplier_cost += Number(sale.cost);
+        row.profit += Number(sale.profit);
+      }
     }
-    return [...grouped.values()].sort((a, b) => b.sold_qty - a.sold_qty);
+    return [...grouped.values()].map((row) => ({
+      ...row,
+      supplier_cost: row.missing_cost_rows ? null : row.supplier_cost,
+      profit: row.missing_cost_rows ? null : row.profit,
+      cost_status: row.missing_cost_rows ? "Missing Vendor Price" : "complete",
+    })).sort((a, b) => b.sold_qty - a.sold_qty);
   }
 
   function periodKey(date, period) {
@@ -433,11 +476,17 @@
     for (const order of filterOrders(computeOrders(data).orders, opts)) {
       const key = periodKey(order.latest_date || order.primary_date, opts?.period || "day");
       if (!key) continue;
-      if (!grouped.has(key)) grouped.set(key, { period: key, revenue: 0, cost: 0, profit: 0, quantity_sold: 0, order_count: 0 });
+      if (!grouped.has(key)) grouped.set(key, { period: key, revenue: 0, cost: 0, profit: 0, quantity_sold: 0, order_count: 0, missing_cost_orders: 0 });
       const row = grouped.get(key);
       row.revenue += Number(order.merchant_payout || 0);
-      row.cost += Number(order.supplier_cost || 0);
-      row.profit += Number(order.net_profit || 0);
+      if (order.has_unknown_supplier_cost) {
+        row.missing_cost_orders += 1;
+        row.cost = null;
+        row.profit = null;
+      } else {
+        if (row.cost != null) row.cost += Number(order.supplier_cost || 0);
+        if (row.profit != null) row.profit += Number(order.net_profit || 0);
+      }
       row.quantity_sold += Number(order.row_count || 0);
       row.order_count += 1;
     }

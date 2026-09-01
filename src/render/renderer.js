@@ -328,8 +328,12 @@ function setStats(t) {
     [`Merchant Payout`, fmt(t.merchantPayout)],
     [`Toters Margin`, fmt(t.totersMargin)],
     [`Supplier Cost`, fmt(t.supplierCost)],
-    [`Net Profit`, fmt(t.netProfit)],
+    [t.incompleteProfitOrders ? `Known Net Profit` : `Net Profit`, fmt(t.netProfit)],
   ];
+
+  if (t.incompleteProfitOrders) {
+    blocks.push([`Orders Missing Cost`, t.incompleteProfitOrders]);
+  }
 
   if (includeSettlements) {
     blocks.push([`Balance Settlements`, fmt(t.settlements)]);
@@ -353,6 +357,7 @@ function calculateTotalsFromRows(rows, includeSettlements) {
     totersMargin: 0,
     supplierCost: 0,
     netProfit: 0,
+    incompleteProfitOrders: 0,
     settlements: 0,
     netProfitWithSettlements: includeSettlements ? 0 : null,
   };
@@ -366,7 +371,8 @@ function calculateTotalsFromRows(rows, includeSettlements) {
     totals.merchantPayout += Number(r.merchant_payout || 0);
     totals.totersMargin += Number(r.toters_margin || 0);
     totals.supplierCost += Number(r.supplier_cost || 0);
-    totals.netProfit += Number(r.net_profit || 0);
+    if (r.has_unknown_supplier_cost) totals.incompleteProfitOrders += 1;
+    else totals.netProfit += Number(r.net_profit || 0);
   }
 
   if (includeSettlements) {
@@ -761,7 +767,7 @@ function renderRows(rows) {
 
   for (const r of rows) {
     const tr = document.createElement("tr");
-    const negativeProfit = Number(r.net_profit || 0) < 0;
+    const negativeProfit = r.net_profit != null && Number(r.net_profit) < 0;
     tr.setAttribute("data-order", r.order_code);
     const safeOrderCode = escapeHtml(r.order_code || "");
 
@@ -808,7 +814,7 @@ function renderRows(rows) {
       <td class="num" data-col="toters_margin">${fmt(r.toters_margin)}</td>
       <td class="num" data-col="supplier_cost">${costCell}</td>
       <td data-col="paid">${paidCell}</td>
-      <td class="num" data-col="net_profit">${fmt(r.net_profit)}</td>
+      <td class="num" data-col="net_profit" title="${r.has_unknown_supplier_cost ? escapeHtml(`${r.missing_supplier_cost_items} item(s) have unresolved supplier cost`) : ""}">${r.has_unknown_supplier_cost ? '<span class="catalog-status catalog-missing_vendor_price">Missing cost</span>' : fmt(r.net_profit)}</td>
       <td class="num" data-col="rows">${r.row_count}</td>
       <td data-col="dates">${escapeHtml(r.dates || "")}</td>
     `;
@@ -1365,8 +1371,14 @@ $("btnGenerateSales").addEventListener("click", async () => {
     const to = salesTo.value || null;
     const supplierIds = getSelectedSupplierIds();
     const rows = await window.api.salesReport({ from, to, supplierIds });
-    const totalProfit = rows.reduce((sum, r) => sum + (Number(r.profit || 0)), 0);
-    alert(`Products: ${rows.length}\nTotal profit (USD): ${totalProfit.toFixed(2)}`);
+    const incomplete = rows.filter((row) => Number(row.missing_cost_rows || 0) > 0);
+    const totalProfit = rows.reduce((sum, r) => sum + (r.profit == null ? 0 : Number(r.profit)), 0);
+    alert(
+      `Products: ${rows.length}\n` +
+      (incomplete.length
+        ? `Profit is incomplete: ${incomplete.length} products have missing Vendor Price.\nKnown profit subtotal (USD): ${totalProfit.toFixed(2)}`
+        : `Total profit (USD): ${totalProfit.toFixed(2)}`)
+    );
   } catch (e) {
     setError(e);
   }

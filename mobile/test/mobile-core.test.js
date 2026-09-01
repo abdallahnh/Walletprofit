@@ -24,6 +24,10 @@ function fixture() {
     { id: 1, order_code: "100-200", barcode: "A", product_id: 1, quantity: 1, total_sale: 10, cost: 4, profit: 6 },
     { id: 2, order_code: "100-200", barcode: "B", product_id: 2, quantity: 1, total_sale: 20, cost: 7, profit: 13 },
   ];
+  data.order_items = [
+    { order_code: "100-200", line_key: "barcode:A", barcode: "A", item_name_snapshot: "Item A snapshot", quantity: 1, image_url_snapshot: "https://example.com/a.jpg", supplier_id: 1, unit_supplier_cost_usd: 4, catalog_sync_status: "matched" },
+    { order_code: "100-200", line_key: "barcode:B", barcode: "B", item_name_snapshot: "Item B snapshot", quantity: 1, supplier_id: 2, unit_supplier_cost_usd: 7, catalog_sync_status: "matched" },
+  ];
   data.order_line_meta = [
     { order_code: "100-200", barcode: "A", supplier_id: 1, supplier_cost_lbp: 360000, supplier_paid: 1 },
     { order_code: "100-200", barcode: "B", supplier_id: 2, supplier_cost_lbp: 630000, supplier_paid: 0 },
@@ -39,6 +43,20 @@ test("mobile core computes shared multi-supplier orders", () => {
   assert.equal(order.supplier_paid, 0);
   assert.deepEqual(order.supplier_line_ids, [1, 2]);
   assert.equal(order.is_multi_supplier, true);
+  assert.equal(order.order_items[0].item_name, "Item A snapshot");
+  assert.equal(order.order_items[0].image_url, "https://example.com/a.jpg");
+});
+
+test("mobile supplier summary includes distinct products and units sold", () => {
+  const rows = Core.getSupplierSummary(fixture(), {});
+  assert.deepEqual(rows.map((row) => ({
+    name: row.supplier_name,
+    products: row.product_count,
+    units: row.units_sold,
+  })), [
+    { name: "Supplier A", products: 1, units: 1 },
+    { name: "Supplier B", products: 1, units: 1 },
+  ]);
 });
 
 test("mobile core creates one bill per supplier", () => {

@@ -903,7 +903,7 @@
     walletRevenueByPeriod: async (opts) => { await ready; return Core.walletRevenueByPeriod(data, opts); },
     salesTopProductsByRevenue: async (opts) => { await ready; return Core.salesReport(data, opts).sort((a, b) => b.revenue - a.revenue).slice(0, Number(opts?.limit || 10)); },
     salesTopProductsByProfit: async (opts) => { await ready; return Core.salesReport(data, opts).sort((a, b) => b.profit - a.profit).slice(0, Number(opts?.limit || 10)); },
-    salesProfitMarginAnalysis: async (opts) => { await ready; return Core.salesReport(data, opts).map((row) => ({ ...row, profit_margin_percent: row.revenue ? row.profit / row.revenue * 100 : 0 })).sort((a, b) => b.profit_margin_percent - a.profit_margin_percent).slice(0, Number(opts?.limit || 20)); },
+    salesProfitMarginAnalysis: async (opts) => { await ready; return Core.salesReport(data, opts).map((row) => ({ ...row, profit_margin_percent: row.profit == null ? null : row.revenue ? row.profit / row.revenue * 100 : 0 })).sort((a, b) => Number(b.profit_margin_percent || 0) - Number(a.profit_margin_percent || 0)).slice(0, Number(opts?.limit || 20)); },
     salesExportExcel: async (opts) => { await ready; return exportExcel("sales-report.xlsx", Core.salesReport(data, opts)); },
     salesSyncFromOrders: async () => ({ ok: false, error: "Toters order-detail synchronization is managed by the desktop app. Sync shared cloud data on mobile to receive the results.", checkpoint: getConfigValue("ordersSyncCheckpoint:") || { status: "idle" } }),
     salesGetOrderSyncStatus: async () => { await ready; return { ok: true, checkpoint: getConfigValue("ordersSyncCheckpoint:") || { status: "idle", next_page: 1, last_completed_page: 1 } }; },

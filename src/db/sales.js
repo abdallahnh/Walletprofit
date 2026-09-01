@@ -234,8 +234,11 @@ function getSalesReport(opts = {}) {
       p.brand,
       SUM(s.quantity) AS sold_qty,
       SUM(s.total_sale) AS revenue,
-      SUM(s.cost) AS supplier_cost,
-      SUM(s.profit) AS profit
+      SUM(CASE WHEN s.cost IS NULL THEN 1 ELSE 0 END) AS missing_cost_rows,
+      CASE WHEN SUM(CASE WHEN s.cost IS NULL THEN 1 ELSE 0 END) = 0
+        THEN SUM(s.cost) ELSE NULL END AS supplier_cost,
+      CASE WHEN SUM(CASE WHEN s.profit IS NULL THEN 1 ELSE 0 END) = 0
+        THEN SUM(s.profit) ELSE NULL END AS profit
     FROM sales s
     LEFT JOIN products p ON s.product_id = p.id
     ${joinSql}
@@ -252,8 +255,10 @@ function getSalesReport(opts = {}) {
     brand: row.brand,
     sold_qty: Number(row.sold_qty || 0),
     revenue: Number(row.revenue || 0),
-    supplier_cost: Number(row.supplier_cost || 0),
-    profit: Number(row.profit || 0),
+    supplier_cost: row.supplier_cost == null ? null : Number(row.supplier_cost),
+    profit: row.profit == null ? null : Number(row.profit),
+    missing_cost_rows: Number(row.missing_cost_rows || 0),
+    cost_status: Number(row.missing_cost_rows || 0) > 0 ? "Missing Vendor Price" : "complete",
   }));
 }
 
@@ -282,8 +287,9 @@ function getRevenueByPeriod(opts = {}) {
     SELECT
       ${dateFormat} AS period,
       SUM(s.total_sale) AS revenue,
-      SUM(s.cost) AS cost,
-      SUM(s.profit) AS profit,
+      SUM(CASE WHEN s.cost IS NULL THEN 1 ELSE 0 END) AS missing_cost_rows,
+      CASE WHEN SUM(CASE WHEN s.cost IS NULL THEN 1 ELSE 0 END)=0 THEN SUM(s.cost) ELSE NULL END AS cost,
+      CASE WHEN SUM(CASE WHEN s.profit IS NULL THEN 1 ELSE 0 END)=0 THEN SUM(s.profit) ELSE NULL END AS profit,
       SUM(s.quantity) AS quantity_sold,
       COUNT(DISTINCT s.order_code) AS order_count
     FROM sales s
@@ -298,8 +304,9 @@ function getRevenueByPeriod(opts = {}) {
   return rows.map((row) => ({
     period: row.period,
     revenue: Number(row.revenue || 0),
-    cost: Number(row.cost || 0),
-    profit: Number(row.profit || 0),
+    cost: row.cost == null ? null : Number(row.cost),
+    profit: row.profit == null ? null : Number(row.profit),
+    missing_cost_rows: Number(row.missing_cost_rows || 0),
     quantity_sold: Number(row.quantity_sold || 0),
     order_count: Number(row.order_count || 0),
   }));
@@ -319,8 +326,9 @@ function getTopProductsByRevenue(opts = {}) {
       p.brand,
       SUM(s.quantity) AS sold_qty,
       SUM(s.total_sale) AS revenue,
-      SUM(s.cost) AS supplier_cost,
-      SUM(s.profit) AS profit
+      SUM(CASE WHEN s.cost IS NULL THEN 1 ELSE 0 END) AS missing_cost_rows,
+      CASE WHEN SUM(CASE WHEN s.cost IS NULL THEN 1 ELSE 0 END)=0 THEN SUM(s.cost) ELSE NULL END AS supplier_cost,
+      CASE WHEN SUM(CASE WHEN s.profit IS NULL THEN 1 ELSE 0 END)=0 THEN SUM(s.profit) ELSE NULL END AS profit
     FROM sales s
     LEFT JOIN products p ON s.product_id = p.id
     ${joinSql}
@@ -338,8 +346,9 @@ function getTopProductsByRevenue(opts = {}) {
     brand: row.brand,
     sold_qty: Number(row.sold_qty || 0),
     revenue: Number(row.revenue || 0),
-    supplier_cost: Number(row.supplier_cost || 0),
-    profit: Number(row.profit || 0),
+    supplier_cost: row.supplier_cost == null ? null : Number(row.supplier_cost),
+    profit: row.profit == null ? null : Number(row.profit),
+    missing_cost_rows: Number(row.missing_cost_rows || 0),
   }));
 }
 
@@ -357,8 +366,9 @@ function getTopProductsByProfit(opts = {}) {
       p.brand,
       SUM(s.quantity) AS sold_qty,
       SUM(s.total_sale) AS revenue,
-      SUM(s.cost) AS supplier_cost,
-      SUM(s.profit) AS profit
+      SUM(CASE WHEN s.cost IS NULL THEN 1 ELSE 0 END) AS missing_cost_rows,
+      CASE WHEN SUM(CASE WHEN s.cost IS NULL THEN 1 ELSE 0 END)=0 THEN SUM(s.cost) ELSE NULL END AS supplier_cost,
+      CASE WHEN SUM(CASE WHEN s.profit IS NULL THEN 1 ELSE 0 END)=0 THEN SUM(s.profit) ELSE NULL END AS profit
     FROM sales s
     LEFT JOIN products p ON s.product_id = p.id
     ${joinSql}
@@ -376,8 +386,9 @@ function getTopProductsByProfit(opts = {}) {
     brand: row.brand,
     sold_qty: Number(row.sold_qty || 0),
     revenue: Number(row.revenue || 0),
-    supplier_cost: Number(row.supplier_cost || 0),
-    profit: Number(row.profit || 0),
+    supplier_cost: row.supplier_cost == null ? null : Number(row.supplier_cost),
+    profit: row.profit == null ? null : Number(row.profit),
+    missing_cost_rows: Number(row.missing_cost_rows || 0),
   }));
 }
 
@@ -397,10 +408,11 @@ function getProfitMarginAnalysis(opts = {}) {
       AVG(COALESCE(s.unit_supplier_cost_usd, p.cost_usd)) AS cost_usd,
       SUM(s.quantity) AS sold_qty,
       SUM(s.total_sale) AS revenue,
-      SUM(s.cost) AS supplier_cost,
-      SUM(s.profit) AS profit,
-      CASE 
-        WHEN SUM(s.total_sale) > 0 
+      SUM(CASE WHEN s.cost IS NULL THEN 1 ELSE 0 END) AS missing_cost_rows,
+      CASE WHEN SUM(CASE WHEN s.cost IS NULL THEN 1 ELSE 0 END)=0 THEN SUM(s.cost) ELSE NULL END AS supplier_cost,
+      CASE WHEN SUM(CASE WHEN s.profit IS NULL THEN 1 ELSE 0 END)=0 THEN SUM(s.profit) ELSE NULL END AS profit,
+      CASE
+        WHEN SUM(CASE WHEN s.profit IS NULL THEN 1 ELSE 0 END)=0 AND SUM(s.total_sale) > 0
         THEN (SUM(s.profit) / SUM(s.total_sale)) * 100 
         ELSE 0 
       END AS profit_margin_percent
@@ -424,9 +436,10 @@ function getProfitMarginAnalysis(opts = {}) {
     cost_price: Number(row.cost_usd || 0),
     sold_qty: Number(row.sold_qty || 0),
     revenue: Number(row.revenue || 0),
-    supplier_cost: Number(row.supplier_cost || 0),
-    profit: Number(row.profit || 0),
-    profit_margin_percent: Number(row.profit_margin_percent || 0),
+    supplier_cost: row.supplier_cost == null ? null : Number(row.supplier_cost),
+    profit: row.profit == null ? null : Number(row.profit),
+    profit_margin_percent: row.profit_margin_percent == null ? null : Number(row.profit_margin_percent),
+    missing_cost_rows: Number(row.missing_cost_rows || 0),
   }));
 }
 

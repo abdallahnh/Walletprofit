@@ -74,7 +74,7 @@ function computeOrders() {
     .prepare(
       `
     SELECT om.order_code, om.supplier_cost, om.supplier_paid, om.supplier_id,
-           om.has_adjusted_items, om.adjusted_items_count,
+           om.has_adjusted_items, om.adjusted_items_count, om.cost_source,
            s.name AS supplier_name, s.color AS supplier_color, s.phone AS supplier_phone
     FROM order_meta om
     LEFT JOIN suppliers s ON s.id = om.supplier_id
@@ -139,7 +139,17 @@ function computeOrders() {
 
     const toters_margin = agg.service_fee + agg.vat - incentive;
 
-    const net_profit = merchant_payout - (meta.supplier_cost || 0);
+    const manuallyCoveredBarcodes = new Set(
+      (meta.line_meta || []).filter((line) => line.cost_source === "manual_override")
+        .map((line) => line.barcode)
+    );
+    const unresolvedCostItems = orderItems.filter((item) =>
+      item.catalog_sync_status !== "matched" && !manuallyCoveredBarcodes.has(item.barcode)
+    );
+    const hasUnknownSupplierCost = unresolvedCostItems.length > 0 &&
+      meta.cost_source !== "manual_override";
+    const net_profit = hasUnknownSupplierCost
+      ? null : merchant_payout - (meta.supplier_cost || 0);
 
     const datesArr = Array.from(agg.dates).sort();
     const primary_date = datesArr[0] || "";
@@ -163,6 +173,8 @@ function computeOrders() {
       supplier_color: meta.supplier_color || "",
       supplier_phone: meta.supplier_phone || "",
       net_profit,
+      has_unknown_supplier_cost: hasUnknownSupplierCost ? 1 : 0,
+      missing_supplier_cost_items: unresolvedCostItems.length,
       row_count: agg.row_count,
       primary_date,
       latest_date,
@@ -254,13 +266,20 @@ function getWalletRevenueByPeriod(opts = {}) {
         profit: 0,
         quantity_sold: 0,
         order_count: 0,
+        missing_cost_orders: 0,
       });
     }
 
     const row = byPeriod.get(key);
     row.revenue += o.merchant_payout || 0;
-    row.cost += o.supplier_cost || 0;
-    row.profit += o.net_profit || 0;
+    if (o.has_unknown_supplier_cost) {
+      row.missing_cost_orders += 1;
+      row.cost = null;
+      row.profit = null;
+    } else {
+      if (row.cost != null) row.cost += o.supplier_cost || 0;
+      if (row.profit != null) row.profit += o.net_profit || 0;
+    }
     row.order_count += 1;
     row.quantity_sold += o.row_count || 0;
   }

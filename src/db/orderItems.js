@@ -155,20 +155,30 @@ function getOrderItemsMap() {
   return map;
 }
 
-function retryPendingItems() {
+function retryPendingItems({ recentWindowDays = 7 } = {}) {
   const db = getDb();
   const rows = db.prepare(
     "SELECT * FROM order_items WHERE catalog_sync_status IN " +
     "('pending','error','missing_product','missing_vendor_price','historical_cost_review') ORDER BY order_code,id"
   ).all();
   const orderCodes = new Set();
+  let historicalCostReview = 0;
+  const recentThreshold = Date.now() - Number(recentWindowDays || 7) * 86400000;
   db.transaction(() => {
     for (const row of rows) {
-      saveLine(enrichLine(row, row));
-      orderCodes.add(row.order_code);
+      const orderTime = Date.parse(row.order_created_at || "");
+      const allowCostSnapshot = Number.isFinite(orderTime) && orderTime >= recentThreshold;
+      const next = enrichLine(row, row, { allowCostSnapshot });
+      saveLine(next);
+      if (next.catalog_sync_status === "matched") orderCodes.add(row.order_code);
+      if (next.catalog_sync_status === "historical_cost_review") historicalCostReview += 1;
     }
   })();
-  return { attempted: rows.length, order_codes: Array.from(orderCodes) };
+  return {
+    attempted: rows.length,
+    order_codes: Array.from(orderCodes),
+    historical_cost_review: historicalCostReview,
+  };
 }
 
 const BACKFILL_STATUSES = [

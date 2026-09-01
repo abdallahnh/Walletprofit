@@ -1057,6 +1057,7 @@ ipcMain.handle("catalog:retryOrderItems", async () => {
       ok: true,
       attempted: retry.attempted,
       orders_rebuilt: retry.order_codes.length,
+      historical_cost_review: retry.historical_cost_review,
       inserted_rows: rebuilt.reduce((sum, row) => sum + Number(row.inserted_rows || 0), 0),
       warning: refreshWarning,
     };
@@ -1281,6 +1282,8 @@ ipcMain.handle("sales:exportExcel", async (_evt, opts) => {
     "Revenue (USD)": r.revenue,
     "Supplier Cost (USD)": r.supplier_cost,
     "Profit (USD)": r.profit,
+    "Cost Status": r.cost_status,
+    "Rows Missing Cost": r.missing_cost_rows,
   }));
 
   const sheet = XLSX.utils.json_to_sheet(sheetData);
