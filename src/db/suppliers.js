@@ -26,7 +26,7 @@ function getAllSuppliers() {
   const db = getDb();
   return db
     .prepare(
-      "SELECT id, name, color, phone, created_at FROM suppliers ORDER BY name COLLATE NOCASE ASC"
+      "SELECT id, name, color, phone, catalog_supplier_key, created_at FROM suppliers ORDER BY name COLLATE NOCASE ASC"
     )
     .all()
     .map((s) => ({
@@ -38,7 +38,7 @@ function getAllSuppliers() {
 function getSupplierById(id) {
   const db = getDb();
   const row = db
-    .prepare("SELECT id, name, color, phone, created_at FROM suppliers WHERE id = ?")
+    .prepare("SELECT id, name, color, phone, catalog_supplier_key, created_at FROM suppliers WHERE id = ?")
     .get(id);
   if (!row) return null;
   return { ...row, color: normalizeColor(row.color, row.id) };
@@ -84,7 +84,7 @@ function getOrCreateSupplier(name) {
 
   const db = getDb();
   const existing = db
-    .prepare("SELECT id, name, color, phone, created_at FROM suppliers WHERE name = ? COLLATE NOCASE")
+    .prepare("SELECT id, name, color, phone, catalog_supplier_key, created_at FROM suppliers WHERE name = ? COLLATE NOCASE")
     .get(trimmed);
 
   if (existing) {
@@ -105,6 +105,39 @@ function getOrCreateSupplier(name) {
     phone: "",
     created_at: new Date().toISOString(),
   };
+}
+
+function getSupplierByCatalogKey(key) {
+  const normalized = String(key || "").trim().toLowerCase();
+  if (!normalized) return null;
+  const row = getDb().prepare(
+    "SELECT id, name, color, phone, catalog_supplier_key, created_at FROM suppliers WHERE catalog_supplier_key = ?"
+  ).get(normalized);
+  return row ? { ...row, color: normalizeColor(row.color, row.id) } : null;
+}
+
+function resolveCatalogSupplier({ supplier_key, supplier_name }) {
+  const key = String(supplier_key || "").trim().toLowerCase();
+  const name = String(supplier_name || "").trim();
+  if (!key || !name) return null;
+  const db = getDb();
+
+  let supplier = db.prepare(
+    "SELECT id, name, color, phone, catalog_supplier_key, created_at FROM suppliers WHERE catalog_supplier_key = ?"
+  ).get(key);
+  if (supplier) return { ...supplier, color: normalizeColor(supplier.color, supplier.id) };
+
+  supplier = db.prepare(
+    "SELECT id, name, color, phone, catalog_supplier_key, created_at FROM suppliers WHERE name = ? COLLATE NOCASE"
+  ).get(name);
+  if (supplier) {
+    db.prepare("UPDATE suppliers SET catalog_supplier_key = ? WHERE id = ?").run(key, supplier.id);
+    return { ...supplier, catalog_supplier_key: key, color: normalizeColor(supplier.color, supplier.id) };
+  }
+
+  const created = getOrCreateSupplier(name);
+  db.prepare("UPDATE suppliers SET catalog_supplier_key = ? WHERE id = ?").run(key, created.id);
+  return { ...created, catalog_supplier_key: key };
 }
 
 function updateSupplier({ id, name, color, phone }) {
@@ -144,10 +177,12 @@ function deleteSupplier(id) {
 module.exports = {
   getAllSuppliers,
   getSupplierById,
+  getSupplierByCatalogKey,
   createSupplier,
   getOrCreateSupplier,
   updateSupplier,
   renameSupplier,
   deleteSupplier,
+  resolveCatalogSupplier,
   normalizeColor,
 };

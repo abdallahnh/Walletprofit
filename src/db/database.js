@@ -194,6 +194,14 @@ function ensureSuppliersColumns(dbConn) {
   if (!existing.has("phone")) {
     dbConn.exec("ALTER TABLE suppliers ADD COLUMN phone TEXT DEFAULT ''");
   }
+  if (!existing.has("catalog_supplier_key")) {
+    dbConn.exec("ALTER TABLE suppliers ADD COLUMN catalog_supplier_key TEXT");
+  }
+  dbConn.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_suppliers_catalog_supplier_key
+    ON suppliers(catalog_supplier_key)
+    WHERE catalog_supplier_key IS NOT NULL AND catalog_supplier_key != ''
+  `);
 }
 
 function ensureOrderMetaColumns(dbConn) {

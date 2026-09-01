@@ -507,12 +507,13 @@ function importBackupData(data, { replace = false } = {}) {
   const configRows = Array.isArray(data.config) ? data.config : [];
 
   const insertSupplier = db.prepare(`
-    INSERT INTO suppliers (id, name, color, phone, created_at)
-    VALUES (@id, @name, @color, @phone, @created_at)
+    INSERT INTO suppliers (id, name, color, phone, catalog_supplier_key, created_at)
+    VALUES (@id, @name, @color, @phone, @catalog_supplier_key, @created_at)
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       color = excluded.color,
-      phone = excluded.phone
+      phone = excluded.phone,
+      catalog_supplier_key = excluded.catalog_supplier_key
   `);
 
   const insertTx = db.prepare(`
@@ -641,6 +642,7 @@ function importBackupData(data, { replace = false } = {}) {
         name: s.name,
         color: s.color || "#e8f4fc",
         phone: s.phone || "",
+        catalog_supplier_key: s.catalog_supplier_key || null,
         created_at: s.created_at || new Date().toISOString(),
       });
     }

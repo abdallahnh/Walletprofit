@@ -1,4 +1,5 @@
 const { getDb } = require("./database");
+const { resolveCatalogSupplier } = require("./suppliers");
 
 function normalizeCatalogProduct(product, mappingByCode = new Map()) {
   const mapping = product.merchant_supplier_mapping ||
@@ -67,6 +68,7 @@ function replaceCatalog(products, mappings) {
         mapping.supplier_name,
         mapping.updated_at || null
       );
+      resolveCatalogSupplier(mapping);
     }
     for (const product of products || []) {
       const normalized = normalizeCatalogProduct(product, mappingByCode);

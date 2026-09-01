@@ -7,6 +7,7 @@ const test = require("node:test");
 const database = require("../src/db/database");
 const catalogCache = require("../src/db/productCatalogCache");
 const walletDb = require("../src/db/wallet");
+const suppliersDb = require("../src/db/suppliers");
 const { createProductCatalogService } = require("../src/services/productCatalogService");
 
 const {
@@ -247,4 +248,30 @@ test("Products page uses the central catalog and remains usable as mobile cards"
   assert.match(html, /@media\(max-width:720px\)/);
   assert.match(html, /td:before\{content:attr\(data-label\)/);
   assert.match(html, /No image/);
+});
+
+test("Merchant mapping attaches to an existing supplier instead of creating a duplicate", () => {
+  const db = createDatabase();
+  const existing = suppliersDb.createSupplier({ name: "bassam" }).supplier;
+  catalogCache.replaceCatalog([], [
+    { merchant_code: "B", supplier_key: "bassam", supplier_name: "Bassam" },
+  ]);
+  const rows = db.prepare(
+    "SELECT id, name, catalog_supplier_key FROM suppliers ORDER BY id"
+  ).all();
+  assert.deepEqual(rows, [{ id: existing.id, name: "bassam", catalog_supplier_key: "bassam" }]);
+  assert.equal(suppliersDb.getSupplierByCatalogKey("BASSAM").id, existing.id);
+});
+
+test("catalog supplier identity survives JSON backup restore", () => {
+  createDatabase();
+  const supplier = suppliersDb.resolveCatalogSupplier({
+    supplier_key: "ahmad",
+    supplier_name: "Ahmad",
+  });
+  const backup = walletDb.collectBackupData();
+  database.getDb().prepare("DELETE FROM suppliers").run();
+  const restored = walletDb.importBackupData(backup, { replace: true });
+  assert.equal(restored.ok, true);
+  assert.equal(suppliersDb.getSupplierByCatalogKey("ahmad").id, supplier.id);
 });
