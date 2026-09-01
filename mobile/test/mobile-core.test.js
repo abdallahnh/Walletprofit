@@ -104,6 +104,23 @@ test("mobile core parses the Toters remaining balance like desktop", () => {
   });
 });
 
+test("mobile profit ledger preserves historical and current split versions", () => {
+  const data = Core.emptyData();
+  data.transactions = [
+    { id: 1, amount: -600000, type: "gross_app_revenue", order_code: "OLD-1", created_at: "2026-07-20" },
+    { id: 2, amount: -300000, type: "gross_app_revenue", order_code: "10863-98881", created_at: "2026-07-24" },
+    { id: 3, amount: -200000, type: "gross_app_revenue", order_code: "NEW-2", created_at: "2026-07-25" },
+  ];
+  const historical = Core.previewHistoricalProfit(data, "10863-98881");
+  assert.deepEqual(historical.allocations.map((row) => row.amount_lbp), [300000, 100000, 200000]);
+  assert.equal(Core.postProfitPreview(data, historical, {}).ok, true);
+  const current = Core.previewCurrentProfit(data);
+  assert.equal(current.total_profit_lbp, 500000);
+  assert.deepEqual(current.allocations.map((row) => row.amount_lbp), [215000, 170000, 115000]);
+  assert.equal(Core.postProfitPreview(data, current, {}).ok, true);
+  assert.equal(Core.getProfitSummary(data).remaining_profit_lbp, 0);
+});
+
 test("mobile bridge covers the desktop preload API contract", () => {
   const root = path.join(__dirname, "..", "..");
   const preload = fs.readFileSync(path.join(root, "src", "render", "preload.js"), "utf8");
@@ -137,4 +154,12 @@ test("phone wallet records use responsive cards instead of a wide table", () => 
   assert.match(mobileCss, /@media \(max-width: 600px\)/);
   assert.match(mobileCss, /\.mobile-card-table tbody tr/);
   assert.match(mobileCss, /#table > tbody > tr\[data-order\]/);
+});
+
+test("profit distribution page exposes historical cutoff, latest split, and version history", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "..", "src", "render", "profitDistributions.html"), "utf8");
+  assert.match(html, /10863-98881/);
+  assert.match(html, /Check Latest Profit/);
+  assert.match(html, /Save as New Active Rule/);
+  assert.match(html, /Distribution history/);
 });

@@ -260,6 +260,9 @@ function getSummary() {
     .reduce((sum, order) => sum + Number(order.net_profit_lbp), 0);
   const history = getHistory();
   const distributed = history.reduce((sum, batch) => sum + Number(batch.total_profit_lbp || 0), 0);
+  const historicalInitialized = history.some((batch) => batch.kind === "historical");
+  const currentPreview = historicalInitialized ? getCurrentPreview() : null;
+  const remaining = currentPreview?.ok ? Number(currentPreview.total_profit_lbp || 0) : knownLifetime;
   const allocations = history.flatMap((batch) => batch.allocations || []);
   const participantMap = new Map();
   for (const row of allocations) {
@@ -282,9 +285,9 @@ function getSummary() {
   return {
     lifetime_net_profit_lbp: knownLifetime,
     distributed_profit_lbp: distributed,
-    remaining_profit_lbp: knownLifetime - distributed,
+    remaining_profit_lbp: remaining,
     incomplete_profit_orders: orders.filter((order) => order.net_profit_lbp == null).length,
-    historical_initialized: history.some((batch) => batch.kind === "historical"),
+    historical_initialized: historicalInitialized,
     active_rule: getActiveRule(),
     participants,
     batches: history.length,

@@ -6,6 +6,7 @@ const test = require("node:test");
 
 const database = require("../src/db/database");
 const distributions = require("../src/db/profitDistributions");
+const walletDb = require("../src/db/wallet");
 
 function setup() {
   database.closeDatabase();
@@ -81,4 +82,17 @@ test("saving a new split creates a version and only affects later batches", () =
   assert.deepEqual(preview.allocations.map((row) => row.amount_lbp), [40000, 40000, 20000]);
   const history = distributions.getHistory();
   assert.deepEqual(history.map((batch) => batch.rule_name), ["Current split", "Historical split"]);
+});
+
+test("cloud JSON backup round-trip preserves split versions and immutable batches", () => {
+  setup();
+  distributions.postHistorical();
+  distributions.postCurrent();
+  const backup = walletDb.collectBackupData();
+  assert.equal(backup.schema_version, 6);
+  assert.equal(backup.profit_distribution_batches.length, 2);
+  walletDb.importBackupData(backup, { replace: true });
+  assert.equal(distributions.getHistory().length, 2);
+  assert.equal(distributions.getSummary().remaining_profit_lbp, 0);
+  assert.equal(distributions.getRules().filter((rule) => rule.is_active).length, 1);
 });

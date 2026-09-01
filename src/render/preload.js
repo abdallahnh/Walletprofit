@@ -7,6 +7,15 @@ contextBridge.exposeInMainWorld("api", {
   // Orders + totals
   ordersGetReconciliation: () => ipcRenderer.invoke("orders:get", {}),
   totalsGet: (opts) => ipcRenderer.invoke("totals:get", opts || {}),
+  profitDistributionsGetSummary: () => ipcRenderer.invoke("profitDistributions:getSummary"),
+  profitDistributionsGetRules: () => ipcRenderer.invoke("profitDistributions:getRules"),
+  profitDistributionsGetHistory: () => ipcRenderer.invoke("profitDistributions:getHistory"),
+  profitDistributionsPreviewHistorical: (cutoff) => ipcRenderer.invoke("profitDistributions:previewHistorical", cutoff),
+  profitDistributionsPostHistorical: (payload) => ipcRenderer.invoke("profitDistributions:postHistorical", payload || {}),
+  profitDistributionsPreviewCurrent: () => ipcRenderer.invoke("profitDistributions:previewCurrent"),
+  profitDistributionsPostCurrent: (payload) => ipcRenderer.invoke("profitDistributions:postCurrent", payload || {}),
+  profitDistributionsCreateRule: (payload) => ipcRenderer.invoke("profitDistributions:createRule", payload || {}),
+  openProfitDistributions: () => ipcRenderer.invoke("open-profit-distributions"),
 
   // Supplier meta
   ordersUpsertMeta: (payload) => ipcRenderer.invoke("orderMeta:set", payload),

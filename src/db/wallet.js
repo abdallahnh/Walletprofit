@@ -1,10 +1,12 @@
 const fs = require("fs");
 const path = require("path");
 const Database = require("better-sqlite3");
-const { getDb, getDbPath, replaceDatabaseFromFile } = require("./database");
+const {
+  getDb, getDbPath, replaceDatabaseFromFile, ensureProfitDistributionTables,
+} = require("./database");
 const walletSyncState = require("./walletSyncState");
 
-const BACKUP_SCHEMA_VERSION = 5;
+const BACKUP_SCHEMA_VERSION = 6;
 
 function normalizeHttpBaseUrl(value) {
   const url = new URL(String(value || "https://dashboard.toters-api.com").trim());
@@ -413,6 +415,11 @@ function collectBackupData() {
       .prepare("SELECT * FROM product_price_history ORDER BY id ASC")
       .all(),
     company_expenses: db.prepare("SELECT * FROM company_expenses ORDER BY id ASC").all(),
+    profit_split_versions: db.prepare("SELECT * FROM profit_split_versions ORDER BY id ASC").all(),
+    profit_split_members: db.prepare("SELECT * FROM profit_split_members ORDER BY version_id, sort_order ASC").all(),
+    profit_distribution_batches: db.prepare("SELECT * FROM profit_distribution_batches ORDER BY id ASC").all(),
+    profit_distribution_orders: db.prepare("SELECT * FROM profit_distribution_orders ORDER BY batch_id, order_code ASC").all(),
+    profit_distribution_allocations: db.prepare("SELECT * FROM profit_distribution_allocations ORDER BY batch_id, party_key ASC").all(),
     walletConfig: getWalletConfig(),
     config: db.prepare("SELECT * FROM config ORDER BY key ASC").all(),
   };
@@ -483,6 +490,11 @@ function clearAllData() {
     DELETE FROM products;
     DELETE FROM suppliers;
     DELETE FROM company_expenses;
+    DELETE FROM profit_distribution_allocations;
+    DELETE FROM profit_distribution_orders;
+    DELETE FROM profit_distribution_batches;
+    DELETE FROM profit_split_members;
+    DELETE FROM profit_split_versions;
     DELETE FROM config;
     PRAGMA foreign_keys = ON;
   `);
@@ -506,6 +518,11 @@ function importBackupData(data, { replace = false } = {}) {
   const companyExpenses = Array.isArray(data.company_expenses)
     ? data.company_expenses
     : [];
+  const splitVersions = Array.isArray(data.profit_split_versions) ? data.profit_split_versions : [];
+  const splitMembers = Array.isArray(data.profit_split_members) ? data.profit_split_members : [];
+  const distributionBatches = Array.isArray(data.profit_distribution_batches) ? data.profit_distribution_batches : [];
+  const distributionOrders = Array.isArray(data.profit_distribution_orders) ? data.profit_distribution_orders : [];
+  const distributionAllocations = Array.isArray(data.profit_distribution_allocations) ? data.profit_distribution_allocations : [];
   const walletConfig = data.walletConfig || null;
   const configRows = Array.isArray(data.config) ? data.config : [];
 
@@ -673,6 +690,47 @@ function importBackupData(data, { replace = false } = {}) {
       updated_at = excluded.updated_at
   `);
 
+  const insertSplitVersion = db.prepare(`
+    INSERT INTO profit_split_versions (id, name, is_active, is_historical, created_at)
+    VALUES (@id, @name, @is_active, @is_historical, @created_at)
+    ON CONFLICT(id) DO UPDATE SET name=excluded.name, is_active=excluded.is_active,
+      is_historical=excluded.is_historical, created_at=excluded.created_at
+  `);
+  const insertSplitMember = db.prepare(`
+    INSERT INTO profit_split_members (version_id, party_key, display_name, share_units, sort_order)
+    VALUES (@version_id, @party_key, @display_name, @share_units, @sort_order)
+    ON CONFLICT(version_id, party_key) DO UPDATE SET display_name=excluded.display_name,
+      share_units=excluded.share_units, sort_order=excluded.sort_order
+  `);
+  const insertDistributionBatch = db.prepare(`
+    INSERT INTO profit_distribution_batches (
+      id, label, kind, split_version_id, total_profit_lbp, cutoff_order_code,
+      cutoff_transaction_id, order_count, missing_cost_orders, notes, created_at
+    ) VALUES (@id, @label, @kind, @split_version_id, @total_profit_lbp,
+      @cutoff_order_code, @cutoff_transaction_id, @order_count,
+      @missing_cost_orders, @notes, @created_at)
+    ON CONFLICT(id) DO UPDATE SET label=excluded.label, kind=excluded.kind,
+      split_version_id=excluded.split_version_id, total_profit_lbp=excluded.total_profit_lbp,
+      cutoff_order_code=excluded.cutoff_order_code, cutoff_transaction_id=excluded.cutoff_transaction_id,
+      order_count=excluded.order_count, missing_cost_orders=excluded.missing_cost_orders,
+      notes=excluded.notes, created_at=excluded.created_at
+  `);
+  const insertDistributionOrder = db.prepare(`
+    INSERT INTO profit_distribution_orders (batch_id, order_code, order_date, net_profit_lbp)
+    VALUES (@batch_id, @order_code, @order_date, @net_profit_lbp)
+    ON CONFLICT(order_code) DO UPDATE SET batch_id=excluded.batch_id,
+      order_date=excluded.order_date, net_profit_lbp=excluded.net_profit_lbp
+  `);
+  const insertDistributionAllocation = db.prepare(`
+    INSERT INTO profit_distribution_allocations (
+      batch_id, party_key, display_name, share_units, amount_lbp, paid_amount_lbp, is_business
+    ) VALUES (@batch_id, @party_key, @display_name, @share_units,
+      @amount_lbp, @paid_amount_lbp, @is_business)
+    ON CONFLICT(batch_id, party_key) DO UPDATE SET display_name=excluded.display_name,
+      share_units=excluded.share_units, amount_lbp=excluded.amount_lbp,
+      paid_amount_lbp=excluded.paid_amount_lbp, is_business=excluded.is_business
+  `);
+
   const insertConfig = db.prepare(`
     INSERT INTO config (key, value) VALUES (@key, @value)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value
@@ -822,6 +880,12 @@ function importBackupData(data, { replace = false } = {}) {
       });
     }
 
+    for (const row of splitVersions) insertSplitVersion.run(row);
+    for (const row of splitMembers) insertSplitMember.run(row);
+    for (const row of distributionBatches) insertDistributionBatch.run(row);
+    for (const row of distributionOrders) insertDistributionOrder.run(row);
+    for (const row of distributionAllocations) insertDistributionAllocation.run(row);
+
     if (configRows.length) {
       for (const c of configRows) {
         insertConfig.run({ key: c.key, value: c.value });
@@ -832,6 +896,7 @@ function importBackupData(data, { replace = false } = {}) {
   });
 
   txn();
+  if (!splitVersions.length) ensureProfitDistributionTables(db);
   return {
     ok: true,
     imported_transactions: tx.length,
@@ -843,6 +908,7 @@ function importBackupData(data, { replace = false } = {}) {
     imported_sales: sales.length,
     imported_price_history: priceHistory.length,
     imported_company_expenses: companyExpenses.length,
+    imported_profit_distribution_batches: distributionBatches.length,
     replaced: !!replace,
   };
 }

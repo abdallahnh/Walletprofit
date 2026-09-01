@@ -16,6 +16,7 @@ const suppliersDb = require("../db/suppliers");
 const billExport = require("../db/billExport");
 const transactionsDb = require("../db/transactions");
 const companyExpensesDb = require("../db/companyExpenses");
+const profitDistributionsDb = require("../db/profitDistributions");
 const orderSyncState = require("../db/orderSyncState");
 const walletSyncState = require("../db/walletSyncState");
 
@@ -453,6 +454,20 @@ ipcMain.handle("suppliers:delete", async (_evt, id) => {
 ipcMain.handle("suppliers:getSummary", async (_evt, opts) => {
   return ordersDb.getSupplierSummary(opts || {});
 });
+
+ipcMain.handle("profitDistributions:getSummary", async () => profitDistributionsDb.getSummary());
+ipcMain.handle("profitDistributions:getRules", async () => profitDistributionsDb.getRules());
+ipcMain.handle("profitDistributions:getHistory", async () => profitDistributionsDb.getHistory());
+ipcMain.handle("profitDistributions:previewHistorical", async (_evt, cutoff) =>
+  profitDistributionsDb.getHistoricalPreview(cutoff || profitDistributionsDb.DEFAULT_CUTOFF_ORDER));
+ipcMain.handle("profitDistributions:postHistorical", async (_evt, payload) =>
+  profitDistributionsDb.postHistorical(payload || {}));
+ipcMain.handle("profitDistributions:previewCurrent", async () =>
+  profitDistributionsDb.getCurrentPreview());
+ipcMain.handle("profitDistributions:postCurrent", async (_evt, payload) =>
+  profitDistributionsDb.postCurrent(payload || {}));
+ipcMain.handle("profitDistributions:createRule", async (_evt, payload) =>
+  profitDistributionsDb.createRule(payload || {}));
 ipcMain.handle("suppliers:getDetails", async (_evt, id) => {
   return suppliersDb.getSupplierDetails(id);
 });
@@ -613,6 +628,18 @@ ipcMain.handle("backup:import", async () => {
   }
 
   return walletDb.importBackupJsonFromFile(filePath, { replace: true });
+});
+
+ipcMain.handle("open-profit-distributions", () => {
+  const { preloadJs } = resolveRendererPaths();
+  const pagePath = path.join(app.getAppPath(), "src", "render", "profitDistributions.html");
+  const win = new BrowserWindow({
+    width: 1180,
+    height: 820,
+    webPreferences: { preload: preloadJs, contextIsolation: true, nodeIntegration: false },
+  });
+  lockDownWindow(win);
+  win.loadFile(pagePath);
 });
 
 ipcMain.handle("cloud:getStatus", async () => getCloudStatus());

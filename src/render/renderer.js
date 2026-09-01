@@ -315,7 +315,7 @@ async function loadTotersRemainingBalance() {
   }
 }
 
-function setStats(t) {
+function setStats(t, distribution) {
   const includeSettlements = chkSettlements.checked;
 
   const blocks = [
@@ -338,6 +338,13 @@ function setStats(t) {
   if (includeSettlements) {
     blocks.push([`Balance Settlements`, fmt(t.settlements)]);
     blocks.push([`Net Profit + Settlements`, fmt(t.netProfitWithSettlements)]);
+  }
+
+  if (distribution) {
+    blocks.push([`All-time Distributed Profit`, fmt(distribution.distributed_profit_lbp || 0)]);
+    blocks.push([`All-time Remaining Profit`, fmt(distribution.remaining_profit_lbp || 0)]);
+    const business = (distribution.participants || []).find((row) => row.party_key === "business");
+    if (business) blocks.push([`Business Reserve Balance`, fmt(business.balance_lbp || 0)]);
   }
 
   stats.innerHTML = blocks
@@ -968,11 +975,14 @@ async function refresh() {
   setError("");
   await loadSupplierList();
   const includeSettlements = chkSettlements.checked;
-  const rows = await window.api.ordersGetReconciliation();
+  const [rows, distribution] = await Promise.all([
+    window.api.ordersGetReconciliation(),
+    window.api.profitDistributionsGetSummary(),
+  ]);
   allRowsCache = rows;
   currentRowsView = applyTableSort(getFilteredRows(rows));
   renderRows(currentRowsView);
-  setStats(calculateTotalsFromRows(currentRowsView, includeSettlements));
+  setStats(calculateTotalsFromRows(currentRowsView, includeSettlements), distribution);
   renderSupplierSummary(currentRowsView);
   loadTotersRemainingBalance().catch((e) => console.error("Toters balance:", e));
 }
@@ -982,7 +992,8 @@ async function refreshViewFromCache() {
   const includeSettlements = chkSettlements.checked;
   currentRowsView = applyTableSort(getFilteredRows(allRowsCache));
   renderRows(currentRowsView);
-  setStats(calculateTotalsFromRows(currentRowsView, includeSettlements));
+  const distribution = await window.api.profitDistributionsGetSummary();
+  setStats(calculateTotalsFromRows(currentRowsView, includeSettlements), distribution);
   renderSupplierSummary(currentRowsView);
 }
 
@@ -1230,6 +1241,9 @@ $("btnTransactions").addEventListener("click", () => {
 });
 $("btnCompanyExpenses").addEventListener("click", () => {
   window.api.openCompanyExpenses();
+});
+$("btnProfitDistributions").addEventListener("click", () => {
+  window.api.openProfitDistributions();
 });
 
 $("btnCloudAccount").addEventListener("click", openCloudModal);

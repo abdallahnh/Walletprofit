@@ -794,6 +794,15 @@
       return { ok: true };
     }),
     resetSupplierMeta: () => mutate(() => { data.order_meta = []; data.order_line_meta = []; return { ok: true }; }),
+    profitDistributionsGetSummary: async () => { await ready; return Core.getProfitSummary(data); },
+    profitDistributionsGetRules: async () => { await ready; return Core.getProfitRules(data); },
+    profitDistributionsGetHistory: async () => { await ready; return Core.getProfitHistory(data); },
+    profitDistributionsPreviewHistorical: async (cutoff) => { await ready; return Core.previewHistoricalProfit(data, cutoff); },
+    profitDistributionsPostHistorical: (payload) => mutate(() => Core.postProfitPreview(data, Core.previewHistoricalProfit(data, payload?.cutoff_order_code), payload)),
+    profitDistributionsPreviewCurrent: async () => { await ready; return Core.previewCurrentProfit(data); },
+    profitDistributionsPostCurrent: (payload) => mutate(() => Core.postProfitPreview(data, Core.previewCurrentProfit(data), payload)),
+    profitDistributionsCreateRule: (payload) => mutate(() => Core.createProfitRule(data, payload)),
+    openProfitDistributions: () => navigate("profitDistributions.html"),
     suppliersGetAll: async () => { await ready; return [...data.suppliers].map((supplier) => ({ ...supplier, color: Core.normalizeColor(supplier.color, supplier.id) })).sort((a, b) => a.name.localeCompare(b.name)); },
     suppliersCreate: (payload) => mutate(() => {
       const name = String(payload?.name || payload || "").trim();

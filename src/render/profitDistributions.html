@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Profit Distribution</title>
+<style>
+:root{--bg:#f5f7fb;--card:#fff;--text:#182230;--muted:#667085;--line:#e4e7ec;--primary:#1769e0;--danger:#b42318;--success:#067647;--warning:#b54708}
+*{box-sizing:border-box}body{margin:0;padding:18px;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",sans-serif}button,input{font:inherit}button{cursor:pointer;border:1px solid var(--line);border-radius:9px;padding:9px 12px;background:#fff}button.primary{background:var(--primary);color:#fff;border-color:var(--primary)}button:disabled{opacity:.5;cursor:not-allowed}input{min-height:38px;border:1px solid #d0d5dd;border-radius:8px;padding:7px 9px}.header{display:flex;justify-content:space-between;gap:14px;align-items:flex-start}.header h1{margin:0;font-size:24px}.muted{color:var(--muted);font-size:13px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:16px 0}.card,.panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;box-shadow:0 1px 2px #1018280a}.card .label{color:var(--muted);font-size:12px}.card .value{font-size:21px;font-weight:750;margin-top:4px}.panels{display:grid;grid-template-columns:1fr 1fr;gap:14px}.panel h2{font-size:17px;margin:0 0 7px}.toolbar{display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-top:12px}.field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}.field input{color:var(--text);min-width:130px}.status{min-height:20px;margin:10px 0;color:var(--muted);font-size:13px}.status.error{color:var(--danger)}.status.success{color:var(--success)}.warning{color:var(--warning);font-weight:650}.preview{margin-top:14px;border-top:1px solid var(--line);padding-top:12px}.preview[hidden]{display:none}.allocations{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0}.allocation{background:#f9fafb;border-radius:10px;padding:10px}.allocation b{display:block;margin-top:3px;font-size:18px}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:11px;margin-top:10px}table{width:100%;border-collapse:collapse;min-width:720px}th,td{padding:9px 8px;border-bottom:1px solid var(--line);font-size:12px;text-align:left}th{background:#f9fafb;color:#475467}.num{text-align:right}.rule-current{color:var(--success);font-weight:700}.history{margin-top:14px}.party-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.hidden{display:none!important}
+@media(max-width:760px){body{padding:10px}.header{display:block}.header button{margin-top:10px}.panels{grid-template-columns:1fr}.allocations,.party-grid{grid-template-columns:1fr}.table-wrap{overflow:visible;border:0}table,tbody,tr,td{display:block;min-width:0}thead{display:none}tr{border:1px solid var(--line);border-radius:11px;margin-bottom:9px;padding:8px;background:#fff}td{border:0;padding:4px}td:before{content:attr(data-label);display:inline-block;min-width:120px;color:var(--muted)}.num{text-align:left}}
+</style>
+</head>
+<body>
+<div class="header"><div><h1>Profit Distribution</h1><div class="muted">Versioned profit splits · posted batches never change historical results</div></div><button id="btnReload">Refresh</button></div>
+<div id="status" class="status"></div>
+<section id="summary" class="grid"></section>
+
+<div class="panels">
+  <section class="panel">
+    <h2>Historical opening distribution</h2>
+    <div class="muted">Uses the historical 3:1:2 rule: Ahmad 50%, Abdallah 16.6667%, Business 33.3333%.</div>
+    <div id="historicalDone" class="status success hidden">Historical distribution is already initialized.</div>
+    <div id="historicalControls">
+      <div class="toolbar"><label class="field">First undistributed order<input id="cutoffOrder" value="10863-98881"></label><button id="btnPreviewHistorical">Preview historical</button></div>
+    </div>
+    <div id="historicalPreview" class="preview" hidden></div>
+  </section>
+
+  <section class="panel">
+    <h2>Latest distributable profit</h2>
+    <div class="muted">Includes every completed-cost order not posted in an earlier batch and uses the newest active split rule.</div>
+    <div class="toolbar"><button id="btnPreviewCurrent" class="primary">Check Latest Profit</button></div>
+    <div id="currentPreview" class="preview" hidden></div>
+  </section>
+</div>
+
+<section class="panel history">
+  <h2>Split rule versions</h2>
+  <div id="activeRule" class="status"></div>
+  <form id="ruleForm" class="toolbar">
+    <label class="field">Rule name<input id="ruleName" value="Updated split" required></label>
+    <label class="field">Ahmad %<input id="ruleAhmad" type="number" min="0" max="100" step="0.01" value="43" required></label>
+    <label class="field">Abdallah %<input id="ruleAbdallah" type="number" min="0" max="100" step="0.01" value="34" required></label>
+    <label class="field">Business %<input id="ruleBusiness" type="number" min="0" max="100" step="0.01" value="23" required></label>
+    <button class="primary" type="submit">Save as New Active Rule</button>
+  </form>
+  <div class="muted">Saving creates a new version. Previous batches keep their original percentages.</div>
+</section>
+
+<section class="panel history">
+  <h2>Distribution history</h2>
+  <div class="table-wrap"><table><thead><tr><th>Date</th><th>Batch</th><th>Rule</th><th>Orders</th><th class="num">Profit</th><th>Allocations</th></tr></thead><tbody id="historyBody"></tbody></table></div>
+</section>
+
+<script>
+"use strict";
+const $=id=>document.getElementById(id);let rate=90000,currency="USD",lastHistorical=null,lastCurrent=null;
+function esc(v){return String(v==null?"":v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
+function fmt(lbp){const value=currency==="USD"?Number(lbp||0)/rate:Number(lbp||0);return currency==="USD"?"$"+value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:3}):value.toLocaleString()+" L.L"}
+function setStatus(message,kind=""){ $("status").textContent=message||"";$("status").className="status"+(kind?" "+kind:"") }
+function card(label,value){return'<div class="card"><div class="label">'+esc(label)+'</div><div class="value">'+esc(value)+'</div></div>'}
+function allocationHtml(rows){return'<div class="allocations">'+(rows||[]).map(row=>'<div class="allocation">'+esc(row.display_name)+' <span class="muted">'+Number(row.percentage||0).toFixed(2)+'%</span><b>'+esc(fmt(row.amount_lbp))+'</b></div>').join("")+'</div>'}
+function previewHtml(preview,kind){if(!preview.ok)return'<div class="warning">'+esc(preview.error)+'</div>';const missing=preview.missing_cost_orders?'<div class="warning">'+preview.missing_cost_orders+' order(s) have missing supplier costs.'+(kind==="historical"?' They will be marked historical, but excluded from the reconstructed amount.':' Resolve them before posting this batch.')+'</div>':"";const button=kind==="historical"?'<button class="primary" data-post-historical>Confirm Historical Distribution</button>':'<button class="primary" data-post-current '+(preview.missing_cost_orders||preview.total_profit_lbp<=0?'disabled':'')+'>Split Profit</button>';return'<div><b>'+preview.order_count+' orders</b> · Total '+esc(fmt(preview.total_profit_lbp))+' · Rule: '+esc(preview.rule&&preview.rule.name||"")+'</div>'+missing+allocationHtml(preview.allocations)+button}
+async function previewHistorical(){setStatus("Calculating historical opening…");lastHistorical=await window.api.profitDistributionsPreviewHistorical($("cutoffOrder").value.trim());$("historicalPreview").innerHTML=previewHtml(lastHistorical,"historical");$("historicalPreview").hidden=false;wirePreviewButtons();setStatus("")}
+async function previewCurrent(){setStatus("Calculating latest undistributed profit…");lastCurrent=await window.api.profitDistributionsPreviewCurrent();$("currentPreview").innerHTML=previewHtml(lastCurrent,"current");$("currentPreview").hidden=false;wirePreviewButtons();setStatus("")}
+function wirePreviewButtons(){document.querySelector("[data-post-historical]")?.addEventListener("click",async()=>{if(!confirm("Mark every order strictly before "+lastHistorical.cutoff_order_code+" as historically distributed? This accounting batch cannot be edited later."))return;const result=await window.api.profitDistributionsPostHistorical({cutoff_order_code:lastHistorical.cutoff_order_code,label:"Opening historical distribution"});if(!result.ok){setStatus(result.error,"error");return}setStatus("Historical distribution posted.","success");await load()});document.querySelector("[data-post-current]")?.addEventListener("click",async()=>{if(!confirm("Split "+fmt(lastCurrent.total_profit_lbp)+" using "+lastCurrent.rule.name+"? The included order profits will be locked in this batch."))return;const result=await window.api.profitDistributionsPostCurrent({label:"Profit distribution"});if(!result.ok){setStatus(result.error,"error");return}setStatus("Profit distribution posted.","success");await load()})}
+function renderSummary(summary){const participants=summary.participants||[],business=participants.find(row=>row.party_key==="business"),ahmad=participants.find(row=>row.party_key==="ahmad"),abdallah=participants.find(row=>row.party_key==="abdallah");$("summary").innerHTML=[card("Lifetime Net Profit",fmt(summary.lifetime_net_profit_lbp)),card("Distributed Profit",fmt(summary.distributed_profit_lbp)),card("Remaining to Distribute",fmt(summary.remaining_profit_lbp)),card("Ahmad Distributed",fmt(ahmad&&ahmad.allocated_lbp||0)),card("Abdallah Distributed",fmt(abdallah&&abdallah.allocated_lbp||0)),card("Business Retained",fmt(business&&business.allocated_lbp||0)),card("Business Expenses",fmt(business&&business.expenses_lbp||0)),card("Business Reserve Balance",fmt(business&&business.balance_lbp||0)),card("Distribution Batches",summary.batches||0),card("Orders Missing Cost",summary.incomplete_profit_orders||0)].join("");$("historicalControls").classList.toggle("hidden",summary.historical_initialized);$("historicalDone").classList.toggle("hidden",!summary.historical_initialized);$("btnPreviewCurrent").disabled=!summary.historical_initialized;const rule=summary.active_rule;$("activeRule").innerHTML=rule?'Current active rule: <span class="rule-current">'+esc(rule.name)+'</span> · '+rule.members.map(row=>esc(row.display_name)+' '+Number(row.percentage).toFixed(2)+'%').join(' · '):'No active split rule'}
+function renderHistory(rows){$("historyBody").innerHTML=rows.length?rows.map(batch=>'<tr><td data-label="Date">'+esc(new Date(batch.created_at).toLocaleString())+'</td><td data-label="Batch">'+esc(batch.label)+(batch.kind==="historical"?' <span class="muted">(Historical)</span>':'')+'</td><td data-label="Rule">'+esc(batch.rule_name)+'</td><td data-label="Orders">'+esc(batch.order_count)+'</td><td data-label="Profit" class="num">'+esc(fmt(batch.total_profit_lbp))+'</td><td data-label="Allocations">'+batch.allocations.map(row=>esc(row.display_name)+': '+esc(fmt(row.amount_lbp))+' <span class="muted">'+(row.is_business?'retained':'paid')+'</span>').join('<br>')+'</td></tr>').join(""):'<tr><td colspan="6">No profit distributions have been posted.</td></tr>'}
+async function load(){const cfg=await window.api.walletGetConfig();rate=Number(cfg&&cfg.usdToLbpRate||90000);currency=cfg&&cfg.displayCurrency||"USD";const [summary,history]=await Promise.all([window.api.profitDistributionsGetSummary(),window.api.profitDistributionsGetHistory()]);renderSummary(summary);renderHistory(history);$("historicalPreview").hidden=true;$("currentPreview").hidden=true}
+$("btnPreviewHistorical").addEventListener("click",()=>previewHistorical().catch(error=>setStatus(String(error),"error")));$("btnPreviewCurrent").addEventListener("click",()=>previewCurrent().catch(error=>setStatus(String(error),"error")));$("btnReload").addEventListener("click",()=>load().catch(error=>setStatus(String(error),"error")));
+$("ruleForm").addEventListener("submit",async event=>{event.preventDefault();const result=await window.api.profitDistributionsCreateRule({name:$("ruleName").value.trim(),ahmad:Number($("ruleAhmad").value),abdallah:Number($("ruleAbdallah").value),business:Number($("ruleBusiness").value)});if(!result.ok){setStatus(result.error,"error");return}setStatus("New split rule activated. Existing distributions were not changed.","success");await load()});
+load().catch(error=>setStatus(String(error),"error"));
+</script>
+</body>
+</html>

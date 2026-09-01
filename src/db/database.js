@@ -590,5 +590,6 @@ module.exports = {
   replaceDatabaseFromFile,
   getDb,
   getDbPath,
+  ensureProfitDistributionTables,
 };
 

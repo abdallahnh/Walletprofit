@@ -17,6 +17,7 @@
   ];
 
   function emptyData() {
+    const now = new Date().toISOString();
     return {
       schema_version: 2,
       exported_at: new Date().toISOString(),
@@ -29,6 +30,21 @@
       sales: [],
       product_price_history: [],
       company_expenses: [],
+      profit_split_versions: [
+        { id: 1, name: "Historical split", is_active: 0, is_historical: 1, created_at: now },
+        { id: 2, name: "Current split", is_active: 1, is_historical: 0, created_at: now },
+      ],
+      profit_split_members: [
+        { version_id: 1, party_key: "ahmad", display_name: "Ahmad Alam El Deen", share_units: 3, sort_order: 1 },
+        { version_id: 1, party_key: "abdallah", display_name: "Abdallah", share_units: 1, sort_order: 2 },
+        { version_id: 1, party_key: "business", display_name: "Business", share_units: 2, sort_order: 3 },
+        { version_id: 2, party_key: "ahmad", display_name: "Ahmad Alam El Deen", share_units: 43, sort_order: 1 },
+        { version_id: 2, party_key: "abdallah", display_name: "Abdallah", share_units: 34, sort_order: 2 },
+        { version_id: 2, party_key: "business", display_name: "Business", share_units: 23, sort_order: 3 },
+      ],
+      profit_distribution_batches: [],
+      profit_distribution_orders: [],
+      profit_distribution_allocations: [],
       config: [],
       walletConfig: {
         baseUrl: "https://dashboard.toters-api.com",
@@ -47,8 +63,10 @@
     for (const key of [
       "transactions", "suppliers", "order_meta", "order_line_meta", "order_items", "products",
       "sales", "product_price_history", "company_expenses", "config",
+      "profit_split_versions", "profit_split_members", "profit_distribution_batches",
+      "profit_distribution_orders", "profit_distribution_allocations",
     ]) {
-      base[key] = Array.isArray(data[key]) ? data[key] : [];
+      base[key] = Array.isArray(data[key]) ? data[key] : base[key];
     }
     base.schema_version = Number(data.schema_version || base.schema_version);
     base.exported_at = data.exported_at || base.exported_at;
@@ -582,6 +600,127 @@
     return value;
   }
 
+  function getProfitRules(rawData) {
+    const data = normalizeData(rawData);
+    return [...data.profit_split_versions]
+      .sort((a, b) => Number(b.id) - Number(a.id))
+      .map((version) => {
+        const members = data.profit_split_members
+          .filter((row) => Number(row.version_id) === Number(version.id))
+          .sort((a, b) => Number(a.sort_order) - Number(b.sort_order));
+        const total = members.reduce((sum, row) => sum + Number(row.share_units || 0), 0);
+        return { ...version, is_active: !!version.is_active, is_historical: !!version.is_historical,
+          total_units: total, members: members.map((row) => ({ ...row, percentage: total ? Number(row.share_units) / total * 100 : 0 })) };
+      });
+  }
+
+  function allocateProfit(total, rule) {
+    const members = rule?.members || [], units = members.reduce((sum, row) => sum + Number(row.share_units || 0), 0);
+    if (!members.length || !units) throw new Error("The selected split rule has no valid shares");
+    let allocated = 0;
+    const businessIndex = Math.max(0, members.findIndex((row) => row.party_key === "business"));
+    const rows = members.map((row, index) => {
+      const amount = index === businessIndex ? 0 : Math.floor(Number(total) * Number(row.share_units) / units);
+      allocated += amount;
+      return { party_key: row.party_key, display_name: row.display_name, share_units: Number(row.share_units),
+        percentage: Number(row.share_units) / units * 100, amount_lbp: amount, is_business: row.party_key === "business" };
+    });
+    rows[businessIndex].amount_lbp = Number(total) - allocated;
+    return rows;
+  }
+
+  function profitOrderRows(rawData) {
+    const data = normalizeData(rawData), sequence = new Map();
+    for (const tx of data.transactions) {
+      const code = tx.order_code || extractOrderCode(tx.reason);
+      if (!code) continue;
+      const id = Number(tx.id || 0), row = sequence.get(code) || { min: id, max: id };
+      row.min = Math.min(row.min, id); row.max = Math.max(row.max, id); sequence.set(code, row);
+    }
+    return computeOrders(data).orders.map((order) => ({
+      order_code: order.order_code, order_date: order.latest_date || order.primary_date || null,
+      net_profit_lbp: order.net_profit == null || order.has_unknown_supplier_cost ? null : Math.round(Number(order.net_profit)),
+      min_transaction_id: Number(sequence.get(order.order_code)?.min || 0),
+      max_transaction_id: Number(sequence.get(order.order_code)?.max || 0),
+    }));
+  }
+
+  function previewHistoricalProfit(rawData, cutoffOrderCode = "10863-98881") {
+    const data = normalizeData(rawData);
+    if (data.profit_distribution_batches.some((row) => row.kind === "historical")) return { ok: false, already_initialized: true, error: "Historical distribution is already initialized" };
+    const target = data.transactions.filter((tx) => String(tx.order_code || extractOrderCode(tx.reason)) === String(cutoffOrderCode));
+    if (!target.length) return { ok: false, error: `Cutoff order ${cutoffOrderCode} was not found` };
+    const cutoff = Math.min(...target.map((tx) => Number(tx.id || 0)).filter(Boolean));
+    const distributed = new Set(data.profit_distribution_orders.map((row) => String(row.order_code)));
+    const orders = profitOrderRows(data).filter((row) => !distributed.has(row.order_code) && row.max_transaction_id > 0 && row.max_transaction_id < cutoff);
+    const known = orders.filter((row) => row.net_profit_lbp != null), missing = orders.length - known.length;
+    const total = known.reduce((sum, row) => sum + Number(row.net_profit_lbp), 0);
+    const rule = getProfitRules(data).find((row) => row.is_historical);
+    return { ok: true, kind: "historical", cutoff_order_code: String(cutoffOrderCode), cutoff_transaction_id: cutoff,
+      order_count: orders.length, missing_cost_orders: missing, total_profit_lbp: total, orders,
+      allocations: allocateProfit(total, rule), rule };
+  }
+
+  function previewCurrentProfit(rawData) {
+    const data = normalizeData(rawData), historical = data.profit_distribution_batches.find((row) => row.kind === "historical");
+    if (!historical) return { ok: false, needs_historical: true, error: "Initialize the historical distribution first" };
+    const distributed = new Set(data.profit_distribution_orders.map((row) => String(row.order_code))), cutoff = Number(historical.cutoff_transaction_id || 0);
+    const candidates = profitOrderRows(data).filter((row) => !distributed.has(row.order_code) && (!cutoff || !row.max_transaction_id || row.max_transaction_id >= cutoff));
+    const orders = candidates.filter((row) => row.net_profit_lbp != null), missing = candidates.filter((row) => row.net_profit_lbp == null);
+    const total = orders.reduce((sum, row) => sum + Number(row.net_profit_lbp), 0);
+    const rule = getProfitRules(data).find((row) => row.is_active && !row.is_historical);
+    return { ok: true, kind: "regular", order_count: orders.length, missing_cost_orders: missing.length,
+      total_profit_lbp: total, orders, missing_orders: missing, allocations: allocateProfit(total, rule), rule };
+  }
+
+  function postProfitPreview(rawData, preview, payload) {
+    const data = normalizeData(rawData);
+    if (!preview?.ok) return preview;
+    if (preview.kind === "regular" && preview.missing_cost_orders) return { ok: false, error: `${preview.missing_cost_orders} order(s) have missing supplier costs` };
+    if (!preview.orders.length || preview.total_profit_lbp <= 0) return { ok: false, error: "There is no positive profit to distribute" };
+    const id = nextId(data.profit_distribution_batches), now = new Date().toISOString();
+    data.profit_distribution_batches.push({ id, label: String(payload?.label || (preview.kind === "historical" ? "Opening historical distribution" : "Profit distribution")),
+      kind: preview.kind, split_version_id: preview.rule.id, total_profit_lbp: preview.total_profit_lbp,
+      cutoff_order_code: preview.cutoff_order_code || null, cutoff_transaction_id: preview.cutoff_transaction_id || null,
+      order_count: preview.orders.length, missing_cost_orders: preview.missing_cost_orders || 0, notes: String(payload?.notes || ""), created_at: now });
+    preview.orders.forEach((order) => data.profit_distribution_orders.push({ batch_id: id, order_code: order.order_code, order_date: order.order_date, net_profit_lbp: order.net_profit_lbp }));
+    preview.allocations.forEach((row) => data.profit_distribution_allocations.push({ batch_id: id, party_key: row.party_key,
+      display_name: row.display_name, share_units: row.share_units, amount_lbp: row.amount_lbp,
+      paid_amount_lbp: row.is_business ? 0 : row.amount_lbp, is_business: row.is_business ? 1 : 0 }));
+    return { ok: true, batch_id: id };
+  }
+
+  function createProfitRule(rawData, payload) {
+    const data = normalizeData(rawData), values = [Number(payload?.ahmad), Number(payload?.abdallah), Number(payload?.business)];
+    if (values.some((value) => !Number.isFinite(value) || value < 0) || Math.abs(values.reduce((a, b) => a + b, 0) - 100) > .001) return { ok: false, error: "Split percentages must be non-negative and total 100%" };
+    data.profit_split_versions.forEach((row) => { if (!row.is_historical) row.is_active = 0; });
+    const id = nextId(data.profit_split_versions), now = new Date().toISOString();
+    data.profit_split_versions.push({ id, name: String(payload.name || "Updated split"), is_active: 1, is_historical: 0, created_at: now });
+    [["ahmad","Ahmad Alam El Deen",values[0]], ["abdallah","Abdallah",values[1]], ["business","Business",values[2]]]
+      .forEach(([key,name,value],index) => data.profit_split_members.push({ version_id: id, party_key: key, display_name: name, share_units: Math.round(value*100), sort_order: index+1 }));
+    return { ok: true, version_id: id };
+  }
+
+  function getProfitHistory(rawData) {
+    const data = normalizeData(rawData), rules = new Map(data.profit_split_versions.map((row) => [Number(row.id), row]));
+    return [...data.profit_distribution_batches].sort((a,b)=>Number(b.id)-Number(a.id)).map((batch) => ({ ...batch,
+      rule_name: rules.get(Number(batch.split_version_id))?.name || "Unknown rule",
+      allocations: data.profit_distribution_allocations.filter((row) => Number(row.batch_id) === Number(batch.id)) }));
+  }
+
+  function getProfitSummary(rawData) {
+    const data = normalizeData(rawData), orders = profitOrderRows(data), history = getProfitHistory(data);
+    const lifetime = orders.filter((row)=>row.net_profit_lbp!=null).reduce((sum,row)=>sum+Number(row.net_profit_lbp),0);
+    const distributed = history.reduce((sum,row)=>sum+Number(row.total_profit_lbp||0),0), participants = new Map();
+    for (const row of data.profit_distribution_allocations) { const p=participants.get(row.party_key)||{party_key:row.party_key,display_name:row.display_name,allocated_lbp:0,paid_lbp:0,is_business:!!row.is_business};p.allocated_lbp+=Number(row.amount_lbp||0);p.paid_lbp+=Number(row.paid_amount_lbp||0);participants.set(row.party_key,p); }
+    const expenses=data.company_expenses.reduce((sum,row)=>sum+Number(row.amount_lbp||0),0);
+    const participantRows=[...participants.values()].map(p=>({...p,expenses_lbp:p.is_business?expenses:0,balance_lbp:p.is_business?p.allocated_lbp-expenses:p.allocated_lbp-p.paid_lbp}));
+    const historicalInitialized=history.some(row=>row.kind==="historical"),current=historicalInitialized?previewCurrentProfit(data):null,remaining=current?.ok?Number(current.total_profit_lbp||0):lifetime;
+    return { lifetime_net_profit_lbp:lifetime,distributed_profit_lbp:distributed,remaining_profit_lbp:remaining,
+      incomplete_profit_orders:orders.filter(row=>row.net_profit_lbp==null).length,historical_initialized:historicalInitialized,
+      active_rule:getProfitRules(data).find(row=>row.is_active&&!row.is_historical)||null,participants:participantRows,batches:history.length };
+  }
+
   function buildBillDataList(rawData, orderCode) {
     const data = normalizeData(rawData);
     const order = computeOrders(data).orders.find((item) => item.order_code === orderCode);
@@ -660,6 +799,13 @@
     salesRevenueByPeriod,
     walletRevenueByPeriod,
     upsertBy,
+    getProfitRules,
+    previewHistoricalProfit,
+    previewCurrentProfit,
+    postProfitPreview,
+    createProfitRule,
+    getProfitHistory,
+    getProfitSummary,
     buildBillDataList,
   };
 });
