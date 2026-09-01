@@ -85,8 +85,22 @@ test("every built HTML page loads the mobile bridge", () => {
   assert.ok(pages.length >= 9);
   for (const page of pages) {
     const html = fs.readFileSync(path.join(www, page), "utf8");
-    assert.match(html, /src="mobile-core\.js"/);
-    assert.match(html, /src="bridge\.js"/);
-    assert.match(html, /href="mobile\.css"/);
+    assert.match(html, /src="mobile-core\.js(?:\?v=[^"]+)?"/);
+    assert.match(html, /src="bridge\.js(?:\?v=[^"]+)?"/);
+    assert.match(html, /href="mobile\.css(?:\?v=[^"]+)?"/);
   }
+});
+
+test("phone wallet records use responsive cards instead of a wide table", () => {
+  const root = path.join(__dirname, "..", "..");
+  const transactions = fs.readFileSync(path.join(root, "src", "render", "transactions.html"), "utf8");
+  const settlements = fs.readFileSync(path.join(root, "src", "render", "settlements.html"), "utf8");
+  const mobileCss = fs.readFileSync(path.join(root, "mobile", "src", "mobile.css"), "utf8");
+
+  assert.match(transactions, /class="mobile-card-table transaction-table"/);
+  assert.match(transactions, /data-mobile-label="Amount"/);
+  assert.match(settlements, /class="mobile-card-table settlement-table"/);
+  assert.match(mobileCss, /@media \(max-width: 600px\)/);
+  assert.match(mobileCss, /\.mobile-card-table tbody tr/);
+  assert.match(mobileCss, /#table > tbody > tr\[data-order\]/);
 });

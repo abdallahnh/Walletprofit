@@ -12,7 +12,7 @@
   const DB_STORE = "snapshots";
   const DB_KEY = "current";
   const SYNC_INTERVAL_MS = 120000;
-  const MOBILE_BUILD = "1.1.1";
+  const MOBILE_BUILD = "1.2.0";
 
   let data = Core.emptyData();
   let session = readJson(AUTH_KEY, null);

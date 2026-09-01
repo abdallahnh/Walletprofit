@@ -14,6 +14,7 @@ const orderSyncState = require("../src/db/orderSyncState");
 const walletSyncState = require("../src/db/walletSyncState");
 const { runCheckpointedOrderSync } = require("../src/services/salesOrderSync");
 const { createSupabaseCloud, snapshotHash } = require("../src/services/supabaseCloud");
+const totersApi = require("../src/services/totersApi");
 
 function createDatabase() {
   database.closeDatabase();
@@ -172,13 +173,45 @@ test("wallet config rejects non-HTTP base URLs", () => {
   assert.match(result.error, /HTTP or HTTPS/);
 });
 
+test("order list requests bypass stale Toters cache", async () => {
+  const originalFetch = global.fetch;
+  const urls = [];
+  const headers = [];
+  global.fetch = async (url, options) => {
+    urls.push(new URL(String(url)));
+    headers.push(options.headers);
+    return {
+      ok: true,
+      text: async () => JSON.stringify({ data: { orders: { data: [] } } }),
+    };
+  };
+
+  try {
+    totersApi.setBaseUrl("https://dashboard.toters-api.com");
+    totersApi.setAuthToken("secret-token");
+    await totersApi.getOrders("100908", 1);
+    await totersApi.getOrders("100908", 1);
+
+    assert.equal(urls.length, 2);
+    assert.equal(urls[0].searchParams.get("store_id"), "100908");
+    assert.equal(urls[0].searchParams.get("page"), "1");
+    assert.ok(urls[0].searchParams.get("_sync"));
+    assert.notEqual(urls[0].searchParams.get("_sync"), urls[1].searchParams.get("_sync"));
+    assert.match(headers[0]["Cache-Control"], /no-cache/);
+    assert.equal(headers[0].Pragma, "no-cache");
+    assert.equal(headers[0].Authorization, "Bearer secret-token");
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test("order sync resumes the failed page without repeating completed orders", async () => {
   createDatabase();
   const storeId = "store-42";
   const fetchedPages = [];
   const loadedCodes = [];
   let failOrderB = true;
-  let pageOneOrders = [{ code: "A", id: 1 }, { code: "B", id: 2 }];
+  let pageOneOrders = [{ code: "A", id: 3 }, { code: "B", id: 2 }];
 
   const fetchPage = async (_storeId, page) => {
     fetchedPages.push(page);
@@ -190,7 +223,7 @@ test("order sync resumes the failed page without repeating completed orders", as
       };
     }
     return {
-      orders: [{ code: "C", id: 3 }],
+      orders: [{ code: "C", id: 1 }],
       rawCount: 1,
       hasNextPage: false,
     };
@@ -218,6 +251,7 @@ test("order sync resumes the failed page without repeating completed orders", as
   assert.equal(second.checkpoint.status, "completed");
   assert.equal(second.checkpoint.last_completed_page, 2);
   assert.equal(second.checkpoint.last_synced_head_code, "A");
+  assert.equal(second.checkpoint.last_synced_head_id, "3");
   assert.deepEqual(loadedCodes, ["A", "B", "B", "C"]);
   assert.deepEqual(fetchedPages, [1, 1, 2]);
 
@@ -229,12 +263,13 @@ test("order sync resumes the failed page without repeating completed orders", as
   assert.deepEqual(loadedCodes, ["A", "B", "B", "C"]);
   assert.deepEqual(fetchedPages, [1, 1, 2, 1]);
 
-  pageOneOrders = [{ code: "D", id: 4 }, ...pageOneOrders];
+  pageOneOrders = [{ code: "A", id: 3 }, { code: "D", id: 4 }, { code: "B", id: 2 }];
   const fourth = await runCheckpointedOrderSync(storeId, { fetchPage, loadDetails });
   assert.equal(fourth.ok, true);
   assert.equal(fourth.stoppedAtWatermark, true);
   assert.equal(fourth.processed, 1);
   assert.equal(fourth.checkpoint.last_synced_head_code, "D");
+  assert.equal(fourth.checkpoint.last_synced_head_id, "4");
   assert.equal(fourth.checkpoint.last_completed_page, 2);
   assert.deepEqual(loadedCodes, ["A", "B", "B", "C", "D"]);
 });
@@ -373,7 +408,7 @@ test("completed v1 sync checkpoints rebuild once to restore historical page dept
 
   const orderState = orderSyncState.get("legacy-store");
   const walletState = walletSyncState.get("legacy-store", "main");
-  assert.equal(orderState.version, 2);
+  assert.equal(orderState.version, 3);
   assert.equal(orderState.status, "idle");
   assert.equal(orderState.last_synced_head_code, null);
   assert.equal(walletState.version, 2);

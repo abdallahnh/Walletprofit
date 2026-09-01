@@ -74,3 +74,159 @@ input, select, textarea { font-size: 16px !important; }
   .stats { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .stat { min-width: 0; overflow: hidden; }
 }
+
+@media (max-width: 600px) {
+  body.mobile-app { padding-inline: calc(8px + var(--mobile-safe-left)) calc(8px + var(--mobile-safe-right)) !important; }
+
+  /* Wallet transactions and settlements become readable record cards. */
+  .mobile-card-wrap {
+    max-height: none !important;
+    overflow: visible !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+  }
+  .mobile-card-table {
+    display: block;
+    width: 100%;
+    min-width: 0 !important;
+  }
+  .mobile-card-table thead { display: none; }
+  .mobile-card-table tbody {
+    display: grid;
+    gap: 10px;
+  }
+  .mobile-card-table tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    padding: 6px 12px;
+    border: 1px solid #dfe5eb;
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: 0 3px 12px rgba(23, 33, 43, .06);
+  }
+  .mobile-card-table tbody td {
+    display: grid;
+    grid-template-columns: 72px minmax(0, 1fr);
+    align-items: start;
+    gap: 10px;
+    min-width: 0;
+    padding: 8px 0;
+    border-bottom: 1px solid #edf0f2;
+    text-align: right !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+  }
+  .mobile-card-table tbody td:last-child { border-bottom: 0; }
+  .mobile-card-table tbody td::before {
+    content: attr(data-mobile-label);
+    color: #6b7680;
+    font-size: 10px;
+    font-weight: 750;
+    letter-spacing: .04em;
+    text-align: left;
+    text-transform: uppercase;
+  }
+  .mobile-card-table .type-pill { justify-self: end; }
+  .mobile-card-table .mobile-value { min-width: 0; text-align: right; }
+  .mobile-card-table .mobile-value .muted { margin: 3px 0 0; overflow-wrap: anywhere; }
+  .mobile-card-table td[data-mobile-label="Reason"] { line-height: 1.4; }
+  .mobile-card-table td[data-mobile-label="Actions"] button { width: 100%; }
+  .mobile-card-table .empty-row { display: block; }
+  .mobile-card-table .empty-row td {
+    display: block;
+    padding: 18px 12px;
+    text-align: center !important;
+  }
+  .mobile-card-table .empty-row td::before { content: none; }
+  .mobile-empty { color: #98a1aa; }
+
+  /* Main reconciliation records use compact, editable cards on phones. */
+  .orders-wrap {
+    max-height: none !important;
+    overflow: visible !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+  }
+  #table {
+    display: block;
+    width: 100%;
+    min-width: 0 !important;
+    table-layout: auto;
+  }
+  #table > thead { display: none; }
+  #table > tbody {
+    display: grid;
+    gap: 12px;
+  }
+  #table > tbody > tr[data-order]:not(.line-sub-row) {
+    display: flex;
+    flex-direction: column;
+    padding: 8px 12px;
+    border: 1px solid #dfe5eb;
+    border-left: 4px solid var(--supplier-color, #dfe5eb);
+    border-radius: 14px;
+    background: #fff !important;
+    box-shadow: 0 3px 12px rgba(23, 33, 43, .06);
+  }
+  #table > tbody > tr[data-order]:not(.line-sub-row) > td {
+    display: grid;
+    grid-template-columns: 104px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    width: auto !important;
+    max-width: none !important;
+    min-height: 30px;
+    padding: 7px 0;
+    border-bottom: 1px solid #edf0f2;
+    text-align: right !important;
+    white-space: normal;
+    overflow: visible;
+  }
+  #table > tbody > tr[data-order]:not(.line-sub-row) > td::before {
+    color: #6b7680;
+    font-size: 10px;
+    font-weight: 750;
+    letter-spacing: .04em;
+    text-align: left;
+    text-transform: uppercase;
+  }
+  #table td[data-col="order"] { order: 1; font-size: 15px; font-weight: 750; }
+  #table td[data-col="order"]::before { content: "Order"; }
+  #table td[data-col="dates"] { order: 2; }
+  #table td[data-col="dates"]::before { content: "Date"; }
+  #table td[data-col="supplier"] { order: 3; }
+  #table td[data-col="supplier"]::before { content: "Supplier"; }
+  #table td[data-col="gross"] { order: 4; }
+  #table td[data-col="gross"]::before { content: "Gross"; }
+  #table td[data-col="merchant_payout"] { order: 5; }
+  #table td[data-col="merchant_payout"]::before { content: "Payout"; }
+  #table td[data-col="supplier_cost"] { order: 6; }
+  #table td[data-col="supplier_cost"]::before { content: "Supplier cost"; }
+  #table td[data-col="paid"] { order: 7; }
+  #table td[data-col="paid"]::before { content: "Paid"; }
+  #table td[data-col="net_profit"] { order: 8; font-weight: 750; }
+  #table td[data-col="net_profit"]::before { content: "Net profit"; }
+  #table td[data-col="view"] { order: 9; border-bottom: 0 !important; }
+  #table td[data-col="view"]::before { content: "Actions"; }
+  #table td[data-col="view"] .view-btn { width: 100%; min-height: 42px; }
+  #table td[data-col="service"],
+  #table td[data-col="vat"],
+  #table td[data-col="incentive"],
+  #table td[data-col="marketing"],
+  #table td[data-col="toters_margin"],
+  #table td[data-col="rows"] { display: none !important; }
+  #table .order-cell-inner { align-items: flex-end !important; }
+  #table select,
+  #table input[type="number"],
+  #table input[type="text"] { width: 100% !important; max-width: 190px; justify-self: end; }
+  #table input[type="checkbox"] { width: 24px; height: 24px; justify-self: end; }
+  #table > tbody > tr.line-sub-row {
+    display: block;
+    overflow-x: auto;
+    padding: 8px;
+    border: 1px solid #f3d58a;
+    border-radius: 12px;
+  }
+  #table > tbody > tr.line-sub-row > td { display: block; padding: 0; }
+  #table .line-meta-inner { min-width: 620px; }
+}

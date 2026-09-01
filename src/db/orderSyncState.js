@@ -10,7 +10,7 @@ function keyForStore(storeId) {
 
 function defaultState(storeId) {
   return {
-    version: 2,
+    version: 3,
     store_id: String(storeId),
     status: "idle",
     next_page: 1,
@@ -22,7 +22,9 @@ function defaultState(storeId) {
     last_completed_at: null,
     last_completed_page: null,
     last_synced_head_code: null,
+    last_synced_head_id: null,
     cycle_head_code: null,
+    cycle_head_id: null,
   };
 }
 
@@ -33,7 +35,7 @@ function normalizeState(storeId, value) {
   return {
     ...fallback,
     ...value,
-    version: 2,
+    version: 3,
     store_id: String(storeId),
     status: rebuildCompletedV1 ? "idle" : value.status,
     next_page: rebuildCompletedV1
@@ -44,7 +46,13 @@ function normalizeState(storeId, value) {
       : [],
     last_completed_page: rebuildCompletedV1 ? null : value.last_completed_page,
     last_synced_head_code: rebuildCompletedV1 ? null : value.last_synced_head_code,
+    last_synced_head_id: rebuildCompletedV1 || value.last_synced_head_id == null
+      ? null
+      : String(value.last_synced_head_id),
     cycle_head_code: rebuildCompletedV1 ? null : value.cycle_head_code,
+    cycle_head_id: rebuildCompletedV1 || value.cycle_head_id == null
+      ? null
+      : String(value.cycle_head_id),
   };
 }
 
@@ -80,15 +88,27 @@ function begin(storeId) {
     completed_order_codes: startsNewCycle ? [] : current.completed_order_codes,
     started_at: startsNewCycle ? new Date().toISOString() : current.started_at,
     cycle_head_code: startsNewCycle ? null : current.cycle_head_code,
+    cycle_head_id: startsNewCycle ? null : current.cycle_head_id,
     last_error: null,
     failed_order_code: null,
   });
 }
 
-function setCycleHead(storeId, orderCode) {
+function setCycleHead(storeId, orderCode, orderId) {
   const current = get(storeId);
-  if (current.cycle_head_code || !orderCode) return current;
-  return save(storeId, { ...current, cycle_head_code: String(orderCode) });
+  if (!orderCode) return current;
+  const candidateId = orderId == null ? null : String(orderId);
+  const currentId = current.cycle_head_id == null ? null : Number(current.cycle_head_id);
+  const nextId = candidateId == null ? null : Number(candidateId);
+  if (current.cycle_head_code && (
+    !Number.isFinite(nextId) ||
+    (Number.isFinite(currentId) && nextId <= currentId)
+  )) return current;
+  return save(storeId, {
+    ...current,
+    cycle_head_code: String(orderCode),
+    cycle_head_id: candidateId,
+  });
 }
 
 function markOrderCompleted(storeId, page, orderCode) {
@@ -143,7 +163,9 @@ function markCompleted(storeId, lastPage) {
     // deepest historical page instead of replacing it with this run's last page.
     last_completed_page: Math.max(Number(current.last_completed_page) || 0, completedPage),
     last_synced_head_code: current.cycle_head_code || current.last_synced_head_code,
+    last_synced_head_id: current.cycle_head_id || current.last_synced_head_id,
     cycle_head_code: null,
+    cycle_head_id: null,
   });
 }
 
@@ -165,6 +187,7 @@ function toPublicState(state) {
     last_completed_at: state.last_completed_at,
     last_completed_page: state.last_completed_page,
     last_synced_head_code: state.last_synced_head_code,
+    last_synced_head_id: state.last_synced_head_id,
   };
 }
 

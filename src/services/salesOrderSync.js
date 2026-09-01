@@ -66,14 +66,38 @@ async function runCheckpointedOrderSync(storeId, dependencies = {}) {
     }
 
     const completed = new Set(state.completed_order_codes);
+    const savedHeadCode = state.last_synced_head_code == null
+      ? null
+      : String(state.last_synced_head_code);
+    const savedHeadOrder = savedHeadCode
+      ? uniqueOrders.find((order) => String(order.code) === savedHeadCode)
+      : null;
+    const savedHeadId = state.last_synced_head_id != null
+      ? Number(state.last_synced_head_id)
+      : Number(savedHeadOrder?.id);
+    let foundWatermarkOnPage = false;
+
     for (const order of uniqueOrders) {
       const code = String(order.code);
-      if (state.last_synced_head_code && code === state.last_synced_head_code) {
-        stats.stoppedAtWatermark = true;
-        state = stateStore.markCompleted(storeId, page);
-        return { ok: true, checkpoint: stateStore.toPublicState(state), ...stats };
+      const orderId = Number(order.id);
+      state = stateStore.setCycleHead(storeId, code, order.id);
+      if (savedHeadCode && code === savedHeadCode) {
+        foundWatermarkOnPage = true;
+        stats.skippedAlreadyCompleted += 1;
+        continue;
       }
-      if (!state.cycle_head_code) state = stateStore.setCycleHead(storeId, code);
+      // Toters does not always return page 1 in strict newest-first order. Scan
+      // the whole page and accept rows newer than the saved numeric order ID,
+      // even when they appear after the saved watermark row.
+      if (
+        savedHeadCode &&
+        Number.isFinite(savedHeadId) &&
+        Number.isFinite(orderId) &&
+        orderId <= savedHeadId
+      ) {
+        stats.skippedAlreadyCompleted += 1;
+        continue;
+      }
       if (completed.has(code)) {
         stats.skippedAlreadyCompleted += 1;
         continue;
@@ -92,6 +116,12 @@ async function runCheckpointedOrderSync(storeId, dependencies = {}) {
         state = stateStore.markFailed(storeId, error, code);
         return { ok: false, error: state.last_error, checkpoint: stateStore.toPublicState(state), ...stats };
       }
+    }
+
+    if (foundWatermarkOnPage) {
+      stats.stoppedAtWatermark = true;
+      state = stateStore.markCompleted(storeId, page);
+      return { ok: true, checkpoint: stateStore.toPublicState(state), ...stats };
     }
 
     if (!pageResult.hasNextPage) {

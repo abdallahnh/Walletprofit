@@ -1,5 +1,6 @@
 let authToken = null;
 let baseUrl = "https://dashboard.toters-api.com/api";
+let ordersRequestSequence = 0;
 
 function setAuthToken(token) {
   authToken = token;
@@ -15,12 +16,13 @@ function setBaseUrl(url) {
   baseUrl = parsed.toString().replace(/\/$/, "") + "/api";
 }
 
-async function httpGet(url) {
+async function httpGet(url, extraHeaders = {}) {
   const res = await fetch(url, {
     method: "GET",
     headers: {
       "Authorization": `Bearer ${authToken}`,
-      "Accept": "application/json"
+      "Accept": "application/json",
+      ...extraHeaders,
     }
   });
 
@@ -39,8 +41,18 @@ async function httpGet(url) {
 // If Toters actually requires POST, tell me and I’ll adapt.
 // For now, we do GET with query param store_id (most common)
 async function getOrders(storeId, page = 1) {
-  const url = `${baseUrl}/orders?store_id=${encodeURIComponent(storeId)}&page=${page}`;
-  return await httpGet(url);
+  // Toters/CDN can retain the exact orders-list URL after new wallet rows have
+  // already appeared. A unique query value plus no-cache headers ensures each
+  // sync cycle sees the current order list instead of a stale page-one response.
+  ordersRequestSequence += 1;
+  const freshness = `${Date.now()}-${ordersRequestSequence}`;
+  const url =
+    `${baseUrl}/orders?store_id=${encodeURIComponent(storeId)}` +
+    `&page=${encodeURIComponent(page)}&_sync=${encodeURIComponent(freshness)}`;
+  return await httpGet(url, {
+    "Cache-Control": "no-cache, no-store, max-age=0",
+    "Pragma": "no-cache",
+  });
 }
 
 async function getOrderDetails(orderId) {
