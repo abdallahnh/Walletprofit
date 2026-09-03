@@ -691,8 +691,8 @@
   const CATALOG_SELECT = [
     "id", "barcode", "item_name", "sku", "brand", "category", "sub_category",
     "description", "model_name", "color", "measurement_unit", "measurement_value",
-    "selling_price_usd", "vendor_price_usd", "merchant_code", "image_url", "image_urls",
-    "stock_quantity", "is_available", "is_archived", "stock_status", "updated_at",
+    "selling_price_usd", "vendor_price_usd", "legacy_cost_usd", "merchant_code", "image_url", "image_urls",
+    "stock_quantity", "is_available", "is_archived", "is_trashed", "stock_status", "updated_at",
     "merchant_supplier_mapping(supplier_key,supplier_name)",
   ].join(",");
 
@@ -718,6 +718,7 @@
     const opts = options || {};
     const filters = [`select=${encodeURIComponent(CATALOG_SELECT)}`, "order=item_name.asc"];
     if (!opts.includeArchived) filters.push("is_archived=eq.false");
+    if (!opts.includeTrashed) filters.push("is_trashed=eq.false");
     const term = String(opts.search || "").trim();
     if (term) {
       const pattern = encodeURIComponent(`*${term}*`);
@@ -911,7 +912,7 @@
       }
     },
     catalogRefreshCache: async () => {
-      const result = await catalogGetProducts({ includeArchived: true });
+      const result = await catalogGetProducts({ includeArchived: true, includeTrashed: true });
       return result.source === "supabase" ? { ok: true, products: result.products.length, refreshed_at: new Date().toISOString() } : { ok: false, error: result.warning };
     },
     catalogRetryOrderItems: async () => ({ ok: false, error: "Retry product matching is available on the desktop app after syncing orders." }),

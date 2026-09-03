@@ -195,6 +195,19 @@ tr.line-sub-row td {
   text-underline-offset: 2px;
 }
 .catalog-status { font-weight: 600; white-space: nowrap !important; }
+.cost-fallback-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  margin-left: 4px;
+  border-radius: 50%;
+  background: #fff4cc;
+  color: #8a5a00;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: help;
+}
 .catalog-matched { color: #087f5b; }
 .catalog-missing_product,
 .catalog-missing_vendor_price,
@@ -426,10 +439,11 @@ tr.line-sub-row td {
 
     /* Modal */
     .hidden { display:none !important; }
-    .modal-backdrop { position:fixed; inset:0; background: rgba(0,0,0,0.35); }
+    .modal-backdrop { position:fixed; inset:0; z-index:1000; background: rgba(0,0,0,0.35); }
     .modal { position:fixed; left:50%; top:50%; transform: translate(-50%, -50%);
       width:min(560px, calc(100vw - 32px)); background:#fff; border-radius: 14px;
       box-shadow: 0 16px 60px rgba(0,0,0,0.25); border: 1px solid rgba(0,0,0,0.08);
+      z-index:1001;
     }
     .modal-header { display:flex; align-items:center; justify-content:space-between; padding:12px 12px 0 12px; }
     .modal-header h3 { margin:0; font-size:14px; }

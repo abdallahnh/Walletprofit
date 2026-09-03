@@ -86,16 +86,21 @@ catalog prices.
 One-time setup:
 
 1. Run `supabase/migrations/20260901_product_catalog.sql` in Supabase SQL Editor after the existing
-   cloud migration.
+   cloud migration. Existing installations must also run
+   `supabase/migrations/20260903_product_catalog_statuses.sql` once.
 2. Review `docs/google-sheet-product-mapping.md`, especially the reported duplicate and invalid
    Sheet rows.
 3. Validate the current Google Sheet without writing to Supabase:
 
    `npm run catalog:import -- --dry-run`
 
-4. For the one-time live import, provide credentials through the shell environment and run:
+4. For the live import, provide credentials through the shell environment and run:
 
    `SUPABASE_URL=... SUPABASE_KEY=... SUPABASE_EMAIL=... SUPABASE_PASSWORD=... npm run catalog:import`
+
+The import is safe to rerun. It upserts all four catalog tabs—Products, Out of Stock, Archive,
+and Trash—by barcode. After it completes, use **Products → Refresh Catalog** on each device to
+replace its local cache from Supabase.
 
 Use the project's publishable key and an approved Supabase Auth account—not the database password.
 A temporary access token or service-role key may be used by an administrator, but it must remain

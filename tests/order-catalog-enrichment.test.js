@@ -24,6 +24,7 @@ function product(overrides = {}) {
     barcode: overrides.barcode || "619659052775",
     item_name: overrides.item_name || "SanDisk Micro SDHC Card",
     vendor_price_usd: overrides.vendor_price_usd === undefined ? 5 : overrides.vendor_price_usd,
+    legacy_cost_usd: overrides.legacy_cost_usd === undefined ? null : overrides.legacy_cost_usd,
     selling_price_usd: 9.478,
     merchant_code: overrides.merchant_code || "B",
     image_url: overrides.image_url || "https://example.com/sandisk.jpg",
@@ -82,6 +83,21 @@ test("Merchant T maps the item snapshot to the existing Ahmad supplier", () => {
     { barcode: "619659052775", quantity: 1 },
   ]));
   assert.equal(orderLineMeta.getOrderLineTotals("40600-47009").supplier_name, "Ahmad");
+});
+
+test("missing Vendor Price falls back to Cost and records a visible source flag", () => {
+  const db = setup([product({ vendor_price_usd: null, legacy_cost_usd: 4 })]);
+  salesDb.recordOrderItemsToSales(order("40600-47019", [
+    { barcode: "619659052775", quantity: 3 },
+  ]));
+  const item = orderItemsDb.getOrderItems("40600-47019")[0];
+  const sale = db.prepare("SELECT * FROM sales WHERE order_code=?").get("40600-47019");
+  assert.equal(item.unit_supplier_cost_usd, 4);
+  assert.equal(item.total_supplier_cost_usd, 12);
+  assert.equal(item.catalog_sync_status, "matched");
+  assert.equal(item.cost_source, "catalog_cost_fallback");
+  assert.equal(sale.cost, 12);
+  assert.equal(sale.cost_source, "catalog_cost_fallback");
 });
 
 test("Toters order-detail images override catalog images without changing cost snapshots", () => {

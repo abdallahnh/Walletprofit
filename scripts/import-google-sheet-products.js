@@ -5,6 +5,15 @@ const fs = require("node:fs");
 
 const DEFAULT_SHEET_CSV_URL =
   "https://docs.google.com/spreadsheets/d/1EQz8BZ2GfyT8t-gWaZdTYtuFK9A_yJ6Aofc4s553bsk/export?format=csv&gid=376649187";
+const DEFAULT_SHEET_SOURCES = [
+  { name: "Products", state: "products", gid: "376649187" },
+  { name: "Out of Stock", state: "out_of_stock", gid: "1058856510" },
+  { name: "Archive", state: "archive", gid: "519129365" },
+  { name: "Trash", state: "trash", gid: "1078048027" },
+].map((source) => ({
+  ...source,
+  url: `https://docs.google.com/spreadsheets/d/1EQz8BZ2GfyT8t-gWaZdTYtuFK9A_yJ6Aofc4s553bsk/export?format=csv&gid=${source.gid}`,
+}));
 const KNOWN_MERCHANTS = new Set(["B", "T"]);
 
 function parseCsv(text) {
@@ -77,20 +86,26 @@ function parseSourceDate(value) {
   return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
 }
 
-function inferCatalogStatus(sourceStatus, stockQuantity) {
+function inferCatalogStatus(sourceStatus, stockQuantity, sheetState = "products") {
   const status = String(sourceStatus || "").trim().toLowerCase();
-  const isArchived = ["archived", "discontinued"].includes(status);
+  const normalizedSheetState = String(sheetState || "products").trim().toLowerCase();
+  const isTrashed = normalizedSheetState === "trash" || status === "trash" || status === "trashed";
+  const isArchived = !isTrashed && (
+    normalizedSheetState === "archive" || ["archived", "discontinued"].includes(status)
+  );
   const explicitlyUnavailable = ["inactive", "unavailable", "out of stock", "out_of_stock"].includes(status);
+  const sheetUnavailable = normalizedSheetState === "out_of_stock";
   const quantityOut = stockQuantity === 0;
-  const isAvailable = !isArchived && !explicitlyUnavailable && !quantityOut;
+  const isAvailable = !isArchived && !isTrashed && !sheetUnavailable && !explicitlyUnavailable && !quantityOut;
   return {
     is_available: isAvailable,
     is_archived: isArchived,
+    is_trashed: isTrashed,
     stock_status: isAvailable ? "in_stock" : "out_of_stock",
   };
 }
 
-function buildImport(csvText) {
+function buildImport(csvText, { sheetName = "Products", sheetState = "products" } = {}) {
   const sourceRows = rowsToObjects(parseCsv(csvText));
   const productsByBarcode = new Map();
   const warnings = [];
@@ -159,7 +174,7 @@ function buildImport(csvText) {
     const images = [source.image1_url, source.image2_url, source.image3_url, source.image4_url]
       .map((value) => String(value ?? "").trim())
       .filter(Boolean);
-    const status = inferCatalogStatus(source.Status, quantity.value);
+    const status = inferCatalogStatus(source.Status, quantity.value, sheetState);
     const product = {
       barcode,
       item_name: itemName,
@@ -181,7 +196,7 @@ function buildImport(csvText) {
       stock_quantity: quantity.value,
       ...status,
       source_product_id: String(source["Product ID"] ?? "").trim() || null,
-      source_status: String(source.Status ?? "").trim() || null,
+      source_status: String(source.Status ?? "").trim() || sheetName,
       source_created_at: parseSourceDate(source.Created),
       source_updated_at: parseSourceDate(source.Updated),
       import_source_raw: source,
@@ -200,8 +215,61 @@ function buildImport(csvText) {
   return { products, summary, warnings };
 }
 
+function buildMultiSheetImport(sources) {
+  const productsByBarcode = new Map();
+  const warnings = [];
+  const summary = {
+    totalRows: 0, inserted: 0, updated: 0, skipped: 0,
+    invalidBarcode: 0, invalidItemName: 0, duplicateBarcode: 0,
+    unknownMerchant: 0, missingVendorPrice: 0, invalidSellingPrice: 0,
+    invalidVendorPrice: 0, invalidLegacyCost: 0, invalidQuantity: 0,
+    readyForUpsert: 0,
+  };
+  const bySheet = {};
+
+  for (const source of sources || []) {
+    const result = buildImport(source.csvText, {
+      sheetName: source.name,
+      sheetState: source.state,
+    });
+    bySheet[source.name] = { ...result.summary };
+    for (const key of Object.keys(summary)) {
+      if (key !== "readyForUpsert") summary[key] += Number(result.summary[key] || 0);
+    }
+    warnings.push(...result.warnings.map((warning) => ({ sheet: source.name, ...warning })));
+    for (const product of result.products) {
+      if (productsByBarcode.has(product.barcode)) {
+        summary.duplicateBarcode += 1;
+        summary.skipped += 1;
+        warnings.push({
+          sheet: source.name,
+          barcode: product.barcode,
+          field: "barcode",
+          value: "duplicate across sheets; inactive-sheet status took precedence",
+        });
+      }
+      // Sources are ordered by increasing status precedence. Later entries win.
+      productsByBarcode.set(product.barcode, product);
+    }
+  }
+  const products = Array.from(productsByBarcode.values());
+  summary.readyForUpsert = products.length;
+  const byStatus = products.reduce((counts, product) => {
+    const key = product.is_trashed
+      ? "trash"
+      : product.is_archived
+        ? "archived"
+        : product.stock_status === "out_of_stock"
+          ? "outOfStock"
+          : "active";
+    counts[key] += 1;
+    return counts;
+  }, { active: 0, outOfStock: 0, archived: 0, trash: 0 });
+  return { products, summary: { ...summary, bySheet, byStatus }, warnings };
+}
+
 function parseArgs(argv) {
-  const options = { dryRun: false, csvPath: null, sheetUrl: DEFAULT_SHEET_CSV_URL };
+  const options = { dryRun: false, csvPath: null, sheetUrl: null };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--dry-run") options.dryRun = true;
@@ -216,9 +284,23 @@ function parseArgs(argv) {
 async function readCsv(options, fetchImpl = global.fetch) {
   if (options.csvPath) return fs.readFileSync(options.csvPath, "utf8");
   if (typeof fetchImpl !== "function") throw new Error("A fetch implementation is required");
-  const response = await fetchImpl(options.sheetUrl);
+  const response = await fetchImpl(options.sheetUrl || DEFAULT_SHEET_CSV_URL);
   if (!response.ok) throw new Error(`Google Sheet download failed (${response.status})`);
   return response.text();
+}
+
+async function readSheetSources(options, fetchImpl = global.fetch) {
+  if (options.csvPath || options.sheetUrl) {
+    return [{ name: "Products", state: "products", csvText: await readCsv(options, fetchImpl) }];
+  }
+  if (typeof fetchImpl !== "function") throw new Error("A fetch implementation is required");
+  return Promise.all(DEFAULT_SHEET_SOURCES.map(async (source) => {
+    const response = await fetchImpl(source.url);
+    if (!response.ok) {
+      throw new Error(`Google Sheet ${source.name} download failed (${response.status})`);
+    }
+    return { ...source, csvText: await response.text() };
+  }));
 }
 
 let cachedSupabaseHeaders = null;
@@ -302,7 +384,7 @@ async function upsertProducts(products, fetchImpl = global.fetch) {
 
 function helpText() {
   return [
-    "One-time Google Sheet to Supabase product importer",
+    "Google Sheet to Supabase product importer (Products, Out of Stock, Archive, Trash)",
     "",
     "Dry run (recommended first):",
     "  node scripts/import-google-sheet-products.js --dry-run",
@@ -324,8 +406,8 @@ async function main(argv = process.argv.slice(2)) {
     process.stdout.write(helpText() + "\n");
     return;
   }
-  const csv = await readCsv(options);
-  const result = buildImport(csv);
+  const sources = await readSheetSources(options);
+  const result = buildMultiSheetImport(sources);
   if (!options.dryRun) {
     Object.assign(result.summary, await upsertProducts(result.products));
   }
@@ -345,11 +427,14 @@ if (require.main === module) {
 
 module.exports = {
   DEFAULT_SHEET_CSV_URL,
+  DEFAULT_SHEET_SOURCES,
   buildImport,
+  buildMultiSheetImport,
   inferCatalogStatus,
   parseAnnotatedNumber,
   parseArgs,
   parseCsv,
   rowsToObjects,
+  readSheetSources,
   upsertProducts,
 };

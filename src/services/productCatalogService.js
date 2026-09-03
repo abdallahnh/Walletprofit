@@ -5,7 +5,7 @@ const PRODUCT_SELECT = [
   "description", "model_name", "color", "measurement_unit", "measurement_value",
   "selling_price_usd", "vendor_price_usd", "legacy_cost_usd", "merchant_code",
   "image_url", "image_urls", "stock_quantity", "is_available", "is_archived",
-  "stock_status", "source_product_id", "source_status", "created_at", "updated_at",
+  "is_trashed", "stock_status", "source_product_id", "source_status", "created_at", "updated_at",
   "merchant_supplier_mapping(supplier_key,supplier_name)",
 ].join(",");
 
@@ -22,8 +22,8 @@ function cleanProductInput(input, { creating = false } = {}) {
   const allowed = [
     "item_name", "sku", "brand", "category", "sub_category", "description",
     "model_name", "color", "measurement_unit", "measurement_value",
-    "selling_price_usd", "vendor_price_usd", "merchant_code", "image_url",
-    "image_urls", "stock_quantity", "is_available", "is_archived", "stock_status",
+    "selling_price_usd", "vendor_price_usd", "legacy_cost_usd", "merchant_code", "image_url",
+    "image_urls", "stock_quantity", "is_available", "is_archived", "is_trashed", "stock_status",
   ];
   if (creating) allowed.unshift("barcode");
   const output = {};
@@ -45,6 +45,9 @@ function cleanProductInput(input, { creating = false } = {}) {
   }
   if (Object.prototype.hasOwnProperty.call(output, "vendor_price_usd")) {
     output.vendor_price_usd = validatePrice(output.vendor_price_usd, "Vendor price");
+  }
+  if (Object.prototype.hasOwnProperty.call(output, "legacy_cost_usd")) {
+    output.legacy_cost_usd = validatePrice(output.legacy_cost_usd, "Cost fallback");
   }
   if (Object.prototype.hasOwnProperty.call(output, "stock_quantity")) {
     output.stock_quantity = validatePrice(output.stock_quantity, "Stock quantity");
@@ -73,9 +76,10 @@ function createProductCatalogService({ cloud, cache = defaultCache } = {}) {
     );
   }
 
-  async function getProducts({ includeArchived = false, search = "" } = {}) {
+  async function getProducts({ includeArchived = false, includeTrashed = false, search = "" } = {}) {
     const filters = ["select=" + encodeURIComponent(PRODUCT_SELECT), "order=item_name.asc"];
     if (!includeArchived) filters.push("is_archived=eq.false");
+    if (!includeTrashed) filters.push("is_trashed=eq.false");
     const term = String(search || "").trim();
     if (term) {
       const pattern = encodeURIComponent("*" + term + "*");
@@ -110,7 +114,7 @@ function createProductCatalogService({ cloud, cache = defaultCache } = {}) {
 
   async function refreshCache() {
     const [products, mappings] = await Promise.all([
-      getProducts({ includeArchived: true }),
+      getProducts({ includeArchived: true, includeTrashed: true }),
       getMappings(),
     ]);
     const result = cache.replaceCatalog(products, mappings);
@@ -151,7 +155,12 @@ function createProductCatalogService({ cloud, cache = defaultCache } = {}) {
     );
   }
 
-  const archiveProduct = (id) => updateProduct(id, { is_archived: true });
+  const archiveProduct = (id) => updateProduct(id, {
+    is_archived: true,
+    is_trashed: false,
+    is_available: false,
+    stock_status: "out_of_stock",
+  });
   const restoreProduct = (id) => updateProduct(id, { is_archived: false });
   const setOutOfStock = (id) => updateProduct(id, {
     stock_status: "out_of_stock",

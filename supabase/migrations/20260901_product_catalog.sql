@@ -42,6 +42,7 @@ create table if not exists public.products (
   stock_quantity numeric(14, 3),
   is_available boolean not null default true,
   is_archived boolean not null default false,
+  is_trashed boolean not null default false,
   stock_status text not null default 'in_stock',
   source_product_id text,
   source_status text,
@@ -67,7 +68,7 @@ create table if not exists public.products (
 );
 
 create index if not exists idx_products_active_name
-  on public.products (is_archived, item_name);
+  on public.products (is_trashed, is_archived, item_name);
 create index if not exists idx_products_merchant
   on public.products (merchant_code);
 create index if not exists idx_products_brand

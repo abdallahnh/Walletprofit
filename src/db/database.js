@@ -431,6 +431,7 @@ function ensureProductCatalogCacheTables(dbConn) {
       measurement_value TEXT,
       selling_price_usd REAL,
       vendor_price_usd REAL,
+      legacy_cost_usd REAL,
       merchant_code TEXT,
       supplier_key TEXT,
       supplier_name TEXT,
@@ -439,6 +440,7 @@ function ensureProductCatalogCacheTables(dbConn) {
       stock_quantity REAL,
       is_available INTEGER NOT NULL DEFAULT 1,
       is_archived INTEGER NOT NULL DEFAULT 0,
+      is_trashed INTEGER NOT NULL DEFAULT 0,
       stock_status TEXT NOT NULL DEFAULT 'in_stock',
       supabase_updated_at TEXT,
       cached_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -459,6 +461,16 @@ function ensureProductCatalogCacheTables(dbConn) {
       cached_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `);
+
+  const catalogColumns = new Set(
+    dbConn.prepare("PRAGMA table_info(product_catalog_cache)").all().map((row) => row.name)
+  );
+  if (!catalogColumns.has("legacy_cost_usd")) {
+    dbConn.exec("ALTER TABLE product_catalog_cache ADD COLUMN legacy_cost_usd REAL");
+  }
+  if (!catalogColumns.has("is_trashed")) {
+    dbConn.exec("ALTER TABLE product_catalog_cache ADD COLUMN is_trashed INTEGER NOT NULL DEFAULT 0");
+  }
 }
 
 function ensureProfitDistributionTables(dbConn) {

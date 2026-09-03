@@ -19,6 +19,7 @@ function normalizeCatalogProduct(product, mappingByCode = new Map()) {
     measurement_value: product.measurement_value ?? null,
     selling_price_usd: product.selling_price_usd ?? null,
     vendor_price_usd: product.vendor_price_usd ?? null,
+    legacy_cost_usd: product.legacy_cost_usd ?? null,
     merchant_code: product.merchant_code ?? null,
     supplier_key: mapping.supplier_key ?? product.supplier_key ?? null,
     supplier_name: mapping.supplier_name ?? product.supplier_name ?? null,
@@ -27,6 +28,7 @@ function normalizeCatalogProduct(product, mappingByCode = new Map()) {
     stock_quantity: product.stock_quantity ?? null,
     is_available: product.is_available === false || product.is_available === 0 ? 0 : 1,
     is_archived: product.is_archived ? 1 : 0,
+    is_trashed: product.is_trashed ? 1 : 0,
     stock_status: product.stock_status || "in_stock",
     supabase_updated_at: product.updated_at ?? product.supabase_updated_at ?? null,
   };
@@ -46,15 +48,15 @@ function replaceCatalog(products, mappings) {
     INSERT INTO product_catalog_cache (
       supabase_id, barcode, item_name, sku, brand, category, sub_category,
       description, model_name, color, measurement_unit, measurement_value,
-      selling_price_usd, vendor_price_usd, merchant_code, supplier_key,
+      selling_price_usd, vendor_price_usd, legacy_cost_usd, merchant_code, supplier_key,
       supplier_name, image_url, image_urls_json, stock_quantity, is_available,
-      is_archived, stock_status, supabase_updated_at, cached_at
+      is_archived, is_trashed, stock_status, supabase_updated_at, cached_at
     ) VALUES (
       @supabase_id, @barcode, @item_name, @sku, @brand, @category, @sub_category,
       @description, @model_name, @color, @measurement_unit, @measurement_value,
-      @selling_price_usd, @vendor_price_usd, @merchant_code, @supplier_key,
+      @selling_price_usd, @vendor_price_usd, @legacy_cost_usd, @merchant_code, @supplier_key,
       @supplier_name, @image_url, @image_urls_json, @stock_quantity, @is_available,
-      @is_archived, @stock_status, @supabase_updated_at, datetime('now')
+      @is_archived, @is_trashed, @stock_status, @supabase_updated_at, datetime('now')
     )
   `);
 
@@ -100,15 +102,15 @@ function upsertProduct(product) {
     INSERT INTO product_catalog_cache (
       supabase_id, barcode, item_name, sku, brand, category, sub_category,
       description, model_name, color, measurement_unit, measurement_value,
-      selling_price_usd, vendor_price_usd, merchant_code, supplier_key,
+      selling_price_usd, vendor_price_usd, legacy_cost_usd, merchant_code, supplier_key,
       supplier_name, image_url, image_urls_json, stock_quantity, is_available,
-      is_archived, stock_status, supabase_updated_at, cached_at
+      is_archived, is_trashed, stock_status, supabase_updated_at, cached_at
     ) VALUES (
       @supabase_id, @barcode, @item_name, @sku, @brand, @category, @sub_category,
       @description, @model_name, @color, @measurement_unit, @measurement_value,
-      @selling_price_usd, @vendor_price_usd, @merchant_code, @supplier_key,
+      @selling_price_usd, @vendor_price_usd, @legacy_cost_usd, @merchant_code, @supplier_key,
       @supplier_name, @image_url, @image_urls_json, @stock_quantity, @is_available,
-      @is_archived, @stock_status, @supabase_updated_at, datetime('now')
+      @is_archived, @is_trashed, @stock_status, @supabase_updated_at, datetime('now')
     )
     ON CONFLICT(supabase_id) DO UPDATE SET
       barcode=excluded.barcode, item_name=excluded.item_name, sku=excluded.sku,
@@ -116,10 +118,12 @@ function upsertProduct(product) {
       description=excluded.description, model_name=excluded.model_name, color=excluded.color,
       measurement_unit=excluded.measurement_unit, measurement_value=excluded.measurement_value,
       selling_price_usd=excluded.selling_price_usd, vendor_price_usd=excluded.vendor_price_usd,
+      legacy_cost_usd=excluded.legacy_cost_usd,
       merchant_code=excluded.merchant_code, supplier_key=excluded.supplier_key,
       supplier_name=excluded.supplier_name, image_url=excluded.image_url,
       image_urls_json=excluded.image_urls_json, stock_quantity=excluded.stock_quantity,
       is_available=excluded.is_available, is_archived=excluded.is_archived,
+      is_trashed=excluded.is_trashed,
       stock_status=excluded.stock_status, supabase_updated_at=excluded.supabase_updated_at,
       cached_at=datetime('now')
   `).run(normalized);
@@ -136,6 +140,7 @@ function rowToProduct(row) {
     image_urls: imageUrls,
     is_available: !!row.is_available,
     is_archived: !!row.is_archived,
+    is_trashed: !!row.is_trashed,
     _catalog_source: "cache",
   };
 }
@@ -148,10 +153,11 @@ function getProductByBarcode(barcode) {
   );
 }
 
-function getProducts({ includeArchived = false, search = "" } = {}) {
+function getProducts({ includeArchived = false, includeTrashed = false, search = "" } = {}) {
   const clauses = [];
   const params = [];
   if (!includeArchived) clauses.push("is_archived = 0");
+  if (!includeTrashed) clauses.push("is_trashed = 0");
   const query = String(search || "").trim();
   if (query) {
     clauses.push("(barcode LIKE ? OR item_name LIKE ? OR sku LIKE ? OR brand LIKE ?)");

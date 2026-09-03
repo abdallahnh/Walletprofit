@@ -87,8 +87,11 @@ function enrichLine(base, existing = null, { allowCostSnapshot = true } = {}) {
     };
   }
   const preserve = !!existing?.cost_source && existing?.unit_supplier_cost_usd != null;
-  const currentVendorPrice = product.vendor_price_usd == null
-    ? null : Number(product.vendor_price_usd);
+  const hasVendorPrice = product.vendor_price_usd != null;
+  const currentVendorPrice = hasVendorPrice
+    ? Number(product.vendor_price_usd)
+    : product.legacy_cost_usd == null ? null : Number(product.legacy_cost_usd);
+  const catalogCostSource = hasVendorPrice ? "catalog_snapshot" : "catalog_cost_fallback";
   const unitCost = preserve ? Number(existing.unit_supplier_cost_usd) :
     allowCostSnapshot ? currentVendorPrice : null;
   const supplier = preserve && existing?.supplier_id
@@ -110,7 +113,7 @@ function enrichLine(base, existing = null, { allowCostSnapshot = true } = {}) {
     merchant_code: preserve ? existing.merchant_code : product.merchant_code || null,
     unit_supplier_cost_usd: unitCost,
     total_supplier_cost_usd: unitCost == null ? null : unitCost * Number(base.quantity || 0),
-    cost_source: unitCost == null ? null : existing?.cost_source || "catalog_snapshot",
+    cost_source: unitCost == null ? null : existing?.cost_source || catalogCostSource,
     catalog_sync_status: status,
     catalog_error: status === "missing_vendor_price"
       ? "Product has no Vendor Price"
@@ -226,7 +229,9 @@ function getBackfillPreview() {
     counts[row.catalog_sync_status] = Number(counts[row.catalog_sync_status] || 0) + 1;
     const product = row.barcode ? catalogCache.getProductByBarcode(row.barcode) : null;
     if (product) metadataCandidates += 1;
-    if (product?.vendor_price_usd != null) currentPriceCandidates += 1;
+    if (product?.vendor_price_usd != null || product?.legacy_cost_usd != null) {
+      currentPriceCandidates += 1;
+    }
   }
   const legacySales = db.prepare(`
     SELECT COUNT(*) AS count FROM sales

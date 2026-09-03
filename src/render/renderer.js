@@ -642,6 +642,12 @@ function catalogStatusLabel(item) {
   return "—";
 }
 
+function catalogCostFlag(item) {
+  if (item.cost_source !== "catalog_cost_fallback") return "";
+  const message = "Vendor Price was empty; this sale used the catalog Cost value";
+  return ` <span class="cost-fallback-icon" role="img" aria-label="${message}" title="${message}">ⓒ</span>`;
+}
+
 function renderItemSubRow(orderCode, orderItems, lines, isSplit) {
   const tr = document.createElement("tr");
   tr.className = "line-sub-row";
@@ -661,7 +667,9 @@ function renderItemSubRow(orderCode, orderItems, lines, isSplit) {
     .map((item) => {
       const line = lineByBarcode.get(item.barcode) || {};
       const supplierId = line.supplier_id || item.supplier_id;
-      const vendorPrice = item.vendor_price_usd == null ? "—" : fmt(Number(item.vendor_price_usd));
+      const vendorPrice = item.vendor_price_usd == null
+        ? "—"
+        : fmt(Number(item.vendor_price_usd)) + catalogCostFlag(item);
       const status = catalogStatusLabel(item);
       if (isSplit) {
         return `
@@ -1041,7 +1049,18 @@ async function loadWalletConfigAndOpen() {
 
 // Buttons
 $("btnRefresh").addEventListener("click", async () => {
-  try { await refresh(); } catch (e) { setError(e); }
+  const button = $("btnRefresh");
+  button.disabled = true;
+  statusEl.textContent = "Refreshing view…";
+  try {
+    await refresh();
+    statusEl.textContent = "View refreshed.";
+  } catch (e) {
+    setError(e);
+    statusEl.textContent = "Refresh failed.";
+  } finally {
+    button.disabled = false;
+  }
 });
 
 $("btnExportCsv").addEventListener("click", async () => {

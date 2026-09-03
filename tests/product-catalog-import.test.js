@@ -12,6 +12,7 @@ const { createProductCatalogService } = require("../src/services/productCatalogS
 
 const {
   buildImport,
+  buildMultiSheetImport,
   inferCatalogStatus,
   parseAnnotatedNumber,
 } = require("../scripts/import-google-sheet-products");
@@ -84,9 +85,10 @@ test("Sheet importer maps the exact SanDisk scenario without trimming its item n
     stock_quantity: 38,
     is_available: true,
     is_archived: false,
+    is_trashed: false,
     stock_status: "in_stock",
     source_product_id: "PRD-000298",
-    source_status: null,
+    source_status: "Products",
     source_created_at: null,
     source_updated_at: null,
     import_source_raw: Object.fromEntries(
@@ -126,12 +128,36 @@ test("availability and archive status are separate concepts", () => {
   assert.deepEqual(inferCatalogStatus("", 0), {
     is_available: false,
     is_archived: false,
+    is_trashed: false,
     stock_status: "out_of_stock",
   });
   assert.deepEqual(inferCatalogStatus("Archived", 5), {
     is_available: false,
     is_archived: true,
+    is_trashed: false,
     stock_status: "out_of_stock",
+  });
+  assert.deepEqual(inferCatalogStatus("", 4, "trash"), {
+    is_available: false,
+    is_archived: false,
+    is_trashed: true,
+    stock_status: "out_of_stock",
+  });
+});
+
+test("multi-sheet import uses inactive tab precedence for duplicate barcodes", () => {
+  const result = buildMultiSheetImport([
+    { name: "Products", state: "products", csvText: makeCsv([makeRow()]) },
+    { name: "Archive", state: "archive", csvText: makeCsv([makeRow({ Status: "Archived" })]) },
+    { name: "Trash", state: "trash", csvText: makeCsv([makeRow({ Status: "Trash" })]) },
+  ]);
+  assert.equal(result.products.length, 1);
+  assert.equal(result.products[0].is_trashed, true);
+  assert.equal(result.products[0].is_archived, false);
+  assert.equal(result.summary.duplicateBarcode, 2);
+  assert.equal(result.summary.bySheet.Archive.readyForUpsert, 1);
+  assert.deepEqual(result.summary.byStatus, {
+    active: 0, outOfStock: 0, archived: 0, trash: 1,
   });
 });
 
@@ -143,6 +169,7 @@ test("Supabase catalog migration intentionally supports archive instead of delet
   assert.match(migration, /barcode text not null unique/i);
   assert.match(migration, /vendor_price_usd numeric/i);
   assert.match(migration, /is_archived boolean not null default false/i);
+  assert.match(migration, /is_trashed boolean not null default false/i);
   assert.doesNotMatch(migration, /grant\s+delete/i);
   assert.match(migration, /\('B', 'bassam', 'Bassam'\)/);
   assert.match(migration, /\('T', 'ahmad', 'Ahmad'\)/);
@@ -156,6 +183,7 @@ test("catalog cache resolves Merchant to the stable supplier mapping", () => {
       barcode: "619659052775",
       item_name: "SanDisk",
       vendor_price_usd: 5,
+      legacy_cost_usd: 4,
       merchant_code: "B",
       image_urls: ["https://example.com/sandisk.jpg"],
       is_available: true,
@@ -170,10 +198,23 @@ test("catalog cache resolves Merchant to the stable supplier mapping", () => {
   assert.deepEqual(result, { products: 1, mappings: 1 });
   const product = catalogCache.getProductByBarcode(" 619659052775 ");
   assert.equal(product.vendor_price_usd, 5);
+  assert.equal(product.legacy_cost_usd, 4);
   assert.equal(product.supplier_key, "bassam");
   assert.equal(product.supplier_name, "Bassam");
   assert.deepEqual(product.image_urls, ["https://example.com/sandisk.jpg"]);
   assert.equal(product._catalog_source, "cache");
+});
+
+test("catalog cache keeps Trash distinct and excludes it from active lists", () => {
+  createDatabase();
+  catalogCache.replaceCatalog([
+    { id: "active", barcode: "ACTIVE-1", item_name: "Active" },
+    { id: "trash", barcode: "TRASH-1", item_name: "Trash", is_trashed: true, is_available: false },
+  ], []);
+  assert.deepEqual(catalogCache.getProducts().map((product) => product.id), ["active"]);
+  const all = catalogCache.getProducts({ includeArchived: true, includeTrashed: true });
+  assert.equal(all.length, 2);
+  assert.equal(all.find((product) => product.id === "trash").is_trashed, true);
 });
 
 test("catalog cache is explicitly excluded from the shared historical snapshot", () => {
@@ -245,12 +286,35 @@ test("Products page uses the central catalog and remains usable as mobile cards"
   assert.match(html, /Vendor Price USD/);
   assert.match(html, /All suppliers/);
   assert.match(html, /Show archived/);
+  assert.match(html, /Show trash/);
   assert.match(html, /@media\(max-width:720px\)/);
   assert.match(html, /td:before\{content:attr\(data-label\)/);
   assert.match(html, /No image/);
   assert.match(html, /Image URLs/);
   assert.match(html, /synced_order_image_url/);
   assert.match(html, /target="_blank"/);
+});
+
+test("catalog fallback flag, modal stacking, and refresh recovery stay wired in the UI", () => {
+  const renderer = fs.readFileSync(
+    path.join(__dirname, "..", "src", "render", "renderer.js"),
+    "utf8"
+  );
+  const index = fs.readFileSync(
+    path.join(__dirname, "..", "src", "render", "index.html"),
+    "utf8"
+  );
+  const products = fs.readFileSync(
+    path.join(__dirname, "..", "src", "render", "products.html"),
+    "utf8"
+  );
+  assert.match(renderer, /catalog_cost_fallback/);
+  assert.match(renderer, /cost-fallback-icon/);
+  assert.match(index, /\.modal-backdrop[^}]*z-index:\s*1000/s);
+  assert.match(index, /\.modal[^}]*z-index:\s*1001/s);
+  assert.match(renderer, /button\.disabled = true[\s\S]*finally[\s\S]*button\.disabled = false/);
+  assert.match(products, /includeTrashed:true/);
+  assert.match(products, /finally\{b\.disabled=false\}/);
 });
 
 test("Merchant mapping attaches to an existing supplier instead of creating a duplicate", () => {
